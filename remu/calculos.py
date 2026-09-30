@@ -116,7 +116,15 @@ def calcular_liquidacion(sueldo_base, gratificacion, movilizacion, colacion, otr
                          periodo=None, anticipo=0,
                          tipo_gratificacion="Monto fijo pactado", afiliado_ccaf=False,
                          pensionado=False, cotiza_afp=True, fecha_nacimiento=None,
-                         fecha_inicio_contrato=None) -> dict:
+                         fecha_inicio_contrato=None, he_detalle=None, haberes_imponibles_extra=None,
+                         haberes_no_imponibles_extra=None, descuentos_extra=None, dias_licencia=0,
+                         asignaciones_del_mes=False) -> dict:
+    """
+    he_detalle: {"he_50": (cantidad, valor), "he_100": (...), "hd": (...), "hed": (...)}; si valor > 0 se usa el valor,
+                si no, cantidad × valor hora × recargo (config.RECARGOS_HORAS).
+    haberes_imponibles_extra / haberes_no_imponibles_extra / descuentos_extra:
+                listas de {"nombre", "monto", "codigo_lre"} provenientes de los movimientos del mes.
+    """
     adv: list[str] = []
     ind = indicadores or {}
     uf = float(ind.get("uf") or 0)
@@ -134,24 +142,55 @@ def calcular_liquidacion(sueldo_base, gratificacion, movilizacion, colacion, otr
     if not utm:
         adv.append("Falta la UTM del periodo: no se puede calcular el impuesto único.")
 
-    dias = max(0, min(30, int(dias or 30)))
+    dias = max(0.0, min(30.0, float(30 if dias is None else dias)))
+    dias = int(dias) if float(dias).is_integer() else dias
     factor = dias / 30.0
     sueldo_calc = int(round((sueldo_base or 0) * factor))
-    mov = int(round((movilizacion or 0) * factor))
-    col = int(round((colacion or 0) * factor))
+    f_asig = 1.0 if asignaciones_del_mes else factor  # montos informados en el movimiento ya son del mes
+    mov = int(round((movilizacion or 0) * f_asig))
+    col = int(round((colacion or 0) * f_asig))
     otr = int(round((otros or 0) * factor))
-    monto_he = calcular_horas_extras(sueldo_base, jornada, horas_extras)
+    detalle: list[dict] = []
+    if he_detalle:
+        monto_he, horas_tot = 0, 0.0
+        hora = (sueldo_base or 0) / (jornada * 30.0 / 7.0) if jornada else 0
+        etiquetas = {"he_50": ("Horas extra 50%", 2102), "he_100": ("Horas extra 100%", 2102),
+                     "hd": ("Recargo horas domingo", 2107), "hed": ("Horas extra domingo", 2102)}
+        for k, (cant, valor) in he_detalle.items():
+            cant, valor = float(cant or 0), float(valor or 0)
+            if not cant and not valor:
+                continue
+            m = int(round(valor)) if valor > 0 else int(round(hora * C.RECARGOS_HORAS[k] * cant))
+            monto_he += m
+            if k != "hd":
+                horas_tot += cant
+            detalle.append({"nombre": f"{etiquetas[k][0]} ({cant:g} h)", "monto": m, "codigo_lre": etiquetas[k][1],
+                            "tipo": "Haber imponible"})
+        horas_extras = horas_tot
+    else:
+        monto_he = calcular_horas_extras(sueldo_base, jornada, horas_extras)
+        if monto_he:
+            detalle.append({"nombre": f"Horas extra 50% ({horas_extras:g} h)", "monto": monto_he, "codigo_lre": 2102,
+                            "tipo": "Haber imponible"})
+    imp_extra = [dict(x, tipo="Haber imponible") for x in (haberes_imponibles_extra or []) if float(x.get("monto") or 0)]
+    noimp_extra = [dict(x, tipo="Haber no imponible") for x in (haberes_no_imponibles_extra or []) if float(x.get("monto") or 0)]
+    desc_extra = [dict(x, tipo="Descuento") for x in (descuentos_extra or []) if float(x.get("monto") or 0)]
+    detalle += imp_extra + noimp_extra + desc_extra
+    aguinaldo = int(round(sum(float(x["monto"]) for x in imp_extra if x.get("codigo_lre") == 2110)))
+    bonos_imp = int(round(sum(float(x["monto"]) for x in imp_extra))) - aguinaldo
+    noimp = int(round(sum(float(x["monto"]) for x in noimp_extra)))
+    otros_desc = int(round(sum(float(x["monto"]) for x in desc_extra)))
 
     # --- Gratificación ---
     tg = tipo_gratificacion or "Monto fijo pactado"
     if tg.startswith("Art. 50"):
-        grat = gratificacion_art50(sueldo_calc + monto_he + otr, renta_minima)
+        grat = gratificacion_art50(sueldo_calc + monto_he + otr + aguinaldo + bonos_imp, renta_minima)
     elif tg.startswith("Sin"):
         grat = 0
     else:
         grat = int(round((gratificacion or 0) * factor))
 
-    total_imponible = sueldo_calc + grat + monto_he + otr
+    total_imponible = sueldo_calc + grat + monto_he + otr + aguinaldo + bonos_imp
 
     # --- Situación previsional ---
     ed = C.edad(fecha_nacimiento, fin_mes)
@@ -223,10 +262,10 @@ def calcular_liquidacion(sueldo_base, gratificacion, movilizacion, colacion, otr
     base_tributable = max(0, total_imponible - afp_monto - salud_7 - afc_trab)
     iu = impuesto_unico(base_tributable, utm)
 
-    total_haberes = sueldo_calc + grat + monto_he + otr + mov + col + asignacion_familiar
+    total_haberes = total_imponible + mov + col + asignacion_familiar + noimp
     anticipo_monto = max(0, int(round(float(anticipo or 0))))
     total_imposiciones = afp_monto + salud_7 + adicional_isapre + afc_trab
-    total_descuentos = total_imposiciones + iu + anticipo_monto
+    total_descuentos = total_imposiciones + iu + anticipo_monto + otros_desc
     liquido = total_haberes - total_descuentos
 
     # --- Validaciones legales ---
@@ -238,6 +277,8 @@ def calcular_liquidacion(sueldo_base, gratificacion, movilizacion, colacion, otr
         if float(sueldo_base) < minimo - 1:
             adv.append(f"Sueldo base ${C.fmt_clp(sueldo_base)} es inferior al ingreso mínimo "
                        f"{'proporcional ' if jornada <= 30 else ''}${C.fmt_clp(minimo)}.")
+    if dias_licencia and dias + float(dias_licencia) > 30:
+        adv.append(f"Días trabajados ({dias}) más días de licencia ({float(dias_licencia):g}) superan 30: revise el movimiento del mes.")
     if liquido < 0:
         adv.append("El líquido resulta negativo: revise anticipos y descuentos.")
 
@@ -255,7 +296,9 @@ def calcular_liquidacion(sueldo_base, gratificacion, movilizacion, colacion, otr
         "reforma_seguro_social": reforma_seguro_social,
         "aplica_reforma": ref["aplica"], "reforma_etapa": ref["etapa"], "reforma_descripcion": ref["descripcion"],
         "base_tributable": base_tributable, "impuesto_unico": iu,
-        "anticipo": anticipo_monto, "otros_descuentos": anticipo_monto,
+        "anticipo": anticipo_monto, "otros_descuentos": otros_desc,
+        "aguinaldo": aguinaldo, "bonos_imponibles": bonos_imp, "haberes_no_imponibles": noimp,
+        "dias_licencia": float(dias_licencia or 0), "detalle": detalle,
         "total_imposiciones": total_imposiciones, "total_descuentos": total_descuentos, "liquido": liquido,
         "base_afp": base_afp, "base_afc": base_afc, "utm": utm, "uf": uf, "renta_minima": renta_minima,
         "carga_empleador_previsional": carga_empleador, "edad": ed, "jornada": jornada,

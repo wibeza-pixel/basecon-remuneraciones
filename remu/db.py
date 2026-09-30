@@ -47,6 +47,19 @@ def is_postgres() -> bool:
     return bool(u) and ("postgres" in u or "supabase" in u)
 
 
+def schema_pg() -> str:
+    """Schema de Postgres donde viven las tablas de BASECON (separado de otras apps en el mismo Supabase)."""
+    s = os.environ.get("BASECON_SCHEMA") or ""
+    if not s:
+        try:
+            import streamlit as st
+            s = st.secrets.get("BASECON_SCHEMA", "") or ""
+        except Exception:
+            s = ""
+    s = (s or "basecon").strip().lower()
+    return s if s.replace("_", "").isalnum() else "basecon"
+
+
 def _adapt(sql: str) -> str:
     return sql.replace("?", "%s") if is_postgres() else sql
 
@@ -77,6 +90,14 @@ class _PgConn:
         self._pool = pool
         self._conn = pool.getconn()
         self._rdc = RealDictCursor
+        self._set_path()
+
+    def _set_path(self):
+        cur = self._conn.cursor()
+        sch = schema_pg()
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {sch}")
+        cur.execute(f"SET search_path TO {sch}")
+        self._conn.commit()
 
     def cursor(self):
         return _PgCursor(self._conn.cursor(cursor_factory=self._rdc))
@@ -86,6 +107,7 @@ class _PgConn:
 
     def commit(self):
         self._conn.commit()
+        self._set_path()  # con pooler en modo transacción, el search_path se reafirma tras cada commit
 
     def rollback(self):
         self._conn.rollback()
@@ -189,6 +211,7 @@ TABLAS = {
         estado_civil TEXT, direccion TEXT, comuna TEXT, email TEXT, telefono TEXT,
         afp TEXT, salud TEXT, isapre TEXT, pactado_salud_uf {REAL} DEFAULT 0,
         cuenta_banco TEXT, banco TEXT, tipo_cuenta TEXT DEFAULT 'RUT',
+        codigo TEXT, cargo TEXT, centro_costo TEXT,
         tramo_asignacion_familiar TEXT DEFAULT 'D', numero_cargas INTEGER DEFAULT 0,
         pensionado INTEGER DEFAULT 0, cotiza_afp INTEGER DEFAULT 1,
         activo INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -225,6 +248,9 @@ TABLAS = {
         reforma_afp_emp {REAL} DEFAULT 0, reforma_crp {REAL} DEFAULT 0,
         reforma_seguro_social {REAL} DEFAULT 0, base_tributable {REAL},
         impuesto_unico {REAL} DEFAULT 0, anticipo {REAL} DEFAULT 0,
+        aguinaldo {REAL} DEFAULT 0, bonos_imponibles {REAL} DEFAULT 0, haberes_no_imponibles {REAL} DEFAULT 0,
+        otros_descuentos {REAL} DEFAULT 0, dias_licencia {REAL} DEFAULT 0, dias_vacaciones {REAL} DEFAULT 0,
+        detalle TEXT,
         total_descuentos {REAL}, liquido {REAL}, tramo_asignacion TEXT, advertencias TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(empresa_id, trabajador_id, periodo)""",
@@ -244,9 +270,28 @@ TABLAS = {
         descuento_afc {REAL} DEFAULT 0, otros_montos {REAL} DEFAULT 0, otros_descuentos {REAL} DEFAULT 0,
         total_finiquito {REAL}, observaciones TEXT, detalle TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
+    "periodos_rrhh": """
+        id {PK}, empresa_id INTEGER NOT NULL REFERENCES empresas(id), periodo TEXT NOT NULL,
+        estado TEXT DEFAULT 'Abierto', enviado_por TEXT, enviado_at TIMESTAMP,
+        UNIQUE(empresa_id, periodo)""",
+    "conceptos": """
+        id {PK}, empresa_id INTEGER NOT NULL REFERENCES empresas(id), nombre TEXT NOT NULL,
+        tipo TEXT DEFAULT 'Haber imponible', codigo_lre INTEGER, activo INTEGER DEFAULT 1, orden INTEGER DEFAULT 0""",
+    "movimientos": """
+        id {PK}, empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+        trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id), periodo TEXT NOT NULL,
+        dias_trabajados {REAL}, ausencias {REAL} DEFAULT 0, licencia {REAL} DEFAULT 0,
+        licencia_desde DATE, licencia_hasta DATE, dias_vacaciones {REAL} DEFAULT 0,
+        anticipo {REAL} DEFAULT 0, aguinaldo {REAL} DEFAULT 0, bono_desempeno {REAL} DEFAULT 0,
+        cant_he_50 {REAL} DEFAULT 0, cant_he_100 {REAL} DEFAULT 0, cant_hd {REAL} DEFAULT 0, cant_hed {REAL} DEFAULT 0,
+        valor_he_50 {REAL} DEFAULT 0, valor_he_100 {REAL} DEFAULT 0, valor_hd {REAL} DEFAULT 0, valor_hed {REAL} DEFAULT 0,
+        colacion {REAL} DEFAULT 0, movilizacion {REAL} DEFAULT 0, extras TEXT, observacion TEXT,
+        updated_by TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(empresa_id, trabajador_id, periodo)""",
     "usuarios": """
         id {PK}, usuario TEXT UNIQUE NOT NULL, nombre TEXT, hash TEXT NOT NULL, salt TEXT NOT NULL,
-        rol TEXT DEFAULT 'usuario', empresas TEXT DEFAULT '[]', activo INTEGER DEFAULT 1,
+        rol TEXT DEFAULT 'usuario', empresas TEXT DEFAULT '[]', modulos TEXT DEFAULT '["remuneraciones"]',
+        activo INTEGER DEFAULT 1,
         dias_acceso INTEGER, fecha_expira DATE, primer_acceso DATE, ultimo_acceso DATE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
     "configuracion": """
@@ -275,6 +320,12 @@ MIGRACIONES = [
     ("liquidaciones", "salud_fonasa", "{REAL} DEFAULT 0"),
     ("liquidaciones", "salud_ccaf", "{REAL} DEFAULT 0"),
     ("liquidaciones", "tramo_asignacion", "TEXT"), ("liquidaciones", "advertencias", "TEXT"),
+    ("trabajadores", "codigo", "TEXT"), ("trabajadores", "cargo", "TEXT"), ("trabajadores", "centro_costo", "TEXT"),
+    ("usuarios", "modulos", "TEXT DEFAULT '[\"remuneraciones\"]'"),
+    ("liquidaciones", "aguinaldo", "{REAL} DEFAULT 0"), ("liquidaciones", "bonos_imponibles", "{REAL} DEFAULT 0"),
+    ("liquidaciones", "haberes_no_imponibles", "{REAL} DEFAULT 0"),
+    ("liquidaciones", "otros_descuentos", "{REAL} DEFAULT 0"), ("liquidaciones", "dias_licencia", "{REAL} DEFAULT 0"),
+    ("liquidaciones", "dias_vacaciones", "{REAL} DEFAULT 0"), ("liquidaciones", "detalle", "TEXT"),
     ("finiquitos", "causal_codigo", "INTEGER"), ("finiquitos", "aviso_dado", "INTEGER DEFAULT 0"),
     ("finiquitos", "base_calculo", "{REAL}"), ("finiquitos", "base_con_tope", "{REAL}"),
     ("finiquitos", "anos_pagar", "INTEGER DEFAULT 0"), ("finiquitos", "feriado_dias_corridos", "{REAL}"),

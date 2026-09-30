@@ -53,7 +53,7 @@ def _firma(u: dict) -> str:
     s = _secret()
     if not s:
         return ""
-    payload = json.dumps([u.get("usuario"), u.get("rol"), u.get("empresas"), str(u.get("fecha_expira") or ""),
+    payload = json.dumps([u.get("usuario"), u.get("rol"), u.get("empresas"), u.get("modulos"), str(u.get("fecha_expira") or ""),
                           u.get("dias_acceso"), str(u.get("primer_acceso") or "")], sort_keys=True)
     return hmac.new(s.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
@@ -72,7 +72,7 @@ def _guardar_firma(conn, uid: int):
 
 
 def crear_usuario(usuario: str, clave: str, nombre: str = "", rol: str = "usuario", empresas="*",
-                  fecha_expira=None, dias_acceso=None) -> int:
+                  fecha_expira=None, dias_acceso=None, modulos=("remuneraciones",)) -> int:
     err = validar_clave_nueva(clave)
     if err:
         raise ValueError(err)
@@ -82,6 +82,7 @@ def crear_usuario(usuario: str, clave: str, nombre: str = "", rol: str = "usuari
     try:
         uid = db.insert(conn, "usuarios", dict(usuario=usuario.strip().lower(), nombre=nombre, hash=h, salt=s,
                                                rol=rol, empresas=emp, activo=1,
+                                               modulos=json.dumps(list(modulos or [])),
                                                fecha_expira=C.a_fecha(fecha_expira), dias_acceso=dias_acceso))
         _guardar_firma(conn, uid)
         conn.commit()
@@ -100,6 +101,8 @@ def actualizar_usuario(uid: int, **campos):
                 if err:
                     raise ValueError(err)
                 campos["hash"], campos["salt"] = hash_clave(clave)
+        if "modulos" in campos and not isinstance(campos["modulos"], str):
+            campos["modulos"] = json.dumps(list(campos["modulos"]))
         if "empresas" in campos and not isinstance(campos["empresas"], str):
             campos["empresas"] = json.dumps(list(campos["empresas"]))
         if campos:
@@ -170,6 +173,18 @@ def empresas_permitidas(u: dict) -> set[int] | None:
         return {int(x) for x in json.loads(e)}
     except Exception:
         return set()
+
+
+def modulos_usuario(u: dict) -> set[str]:
+    """Módulos habilitados: 'rrhh' (movimientos del mes) y/o 'remuneraciones'. El administrador tiene todos."""
+    if not u:
+        return set()
+    if u.get("rol") == "admin":
+        return set(C.MODULOS)
+    try:
+        return {m for m in json.loads(u.get("modulos") or '["remuneraciones"]') if m in C.MODULOS}
+    except Exception:
+        return {"remuneraciones"}
 
 
 def en_la_nube_sin_bd_persistente() -> bool:

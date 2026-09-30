@@ -228,3 +228,30 @@ def edad(fecha_nac, al: date) -> int | None:
     if not f:
         return None
     return al.year - f.year - ((al.month, al.day) < (f.month, f.day))
+
+# ------------------------------------------------------------------
+# Módulo RRHH (movimientos del mes)
+# ------------------------------------------------------------------
+MODULOS = {"rrhh": "Movimientos RRHH", "remuneraciones": "Remuneraciones"}
+ESTADOS_PERIODO = ["Abierto", "Enviado", "Cerrado"]
+
+# Factor sobre el valor hora ordinaria (sueldo / (jornada × 30/7)) cuando el movimiento trae solo la cantidad.
+# Si el movimiento informa el valor en pesos, se usa ese valor.
+RECARGOS_HORAS = {
+    "he_50": 1.5,   # horas extra con recargo 50% (art. 32)
+    "he_100": 2.0,  # horas extra con recargo 100% (pactado)
+    "hd": 0.3,      # horas ordinarias en domingo: solo el recargo del 30% (art. 38 inc. 3, comercio)
+    "hed": 2.0,     # horas extra en domingo (pactado)
+}
+
+TIPOS_CONCEPTO = ["Haber imponible", "Haber no imponible", "Descuento"]
+# Códigos LRE ofrecidos para conceptos definidos por la empresa
+CODIGOS_LRE_CONCEPTO = {
+    "Haber imponible": {2113: "Bonos u otras remuneraciones variables", 2111: "Bonos u otras remuneraciones fijas",
+                        2103: "Comisiones", 2104: "Semana corrida", 2105: "Participación", 2110: "Aguinaldo",
+                        2112: "Tratos"},
+    "Haber no imponible": {2303: "Viáticos", 2304: "Asignación pérdida de caja", 2305: "Desgaste de herramientas",
+                           2308: "Sala cuna", 2309: "Asignación teletrabajo", 2306: "Gastos por causa del trabajo"},
+    "Descuento": {3183: "Otros descuentos autorizados por el trabajador", 3186: "Pensión de alimentos",
+                  3110: "Crédito social CCAF", 3185: "Otros descuentos (art. 58)", 3181: "Cuota vivienda o educación"},
+}

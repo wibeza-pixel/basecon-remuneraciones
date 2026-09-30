@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 from datetime import date
 from pathlib import Path
@@ -51,17 +52,17 @@ def generar_libro_remuneraciones(empresa_id, periodo, ruta):  # noqa: C901
     subtitle_font = Font(bold=True, size=11)
 
     # Encabezado
-    ws.merge_cells('A1:AF1')
+    ws.merge_cells('A1:AI1')
     ws['A1'] = "LIBRO DE REMUNERACIONES"
     ws['A1'].font = title_font
     ws['A1'].alignment = Alignment(horizontal='center')
 
-    ws.merge_cells('A2:AF2')
+    ws.merge_cells('A2:AI2')
     ws['A2'] = f"{emp['razon_social']}  |  RUT: {emp['rut']}  |  Periodo: {periodo}"
     ws['A2'].font = subtitle_font
     ws['A2'].alignment = Alignment(horizontal='center')
 
-    ws.merge_cells('A3:AF3')
+    ws.merge_cells('A3:AI3')
     ws['A3'] = f"Dirección: {emp.get('direccion') or ''} , {emp.get('comuna') or ''} - {emp.get('ciudad') or ''}"
     ws['A3'].alignment = Alignment(horizontal='center')
 
@@ -69,10 +70,10 @@ def generar_libro_remuneraciones(empresa_id, periodo, ruta):  # noqa: C901
     headers = [
         "N°", "RUT", "Apellido Paterno", "Apellido Materno", "Nombres", "Cargo",
         "Días Trab.", "Hrs Extras", "Monto HE", "Sueldo Base", "Gratificación",
-        "Movilización", "Colación", "Asig. Familiar", "Otros Haberes",
+        "Movilización", "Colación", "Asig. Familiar", "Otros Haberes", "Bonos y Aguinaldo", "Otros No Imponibles",
         "Total Haberes", "Total Imponible",
         "AFP", "Salud", "Adic. Isapre", "AFC Trab.", "Base Tributable", "Impuesto Único",
-        "Anticipos", "Total Descuentos", "Líquido a Pago",
+        "Anticipos", "Otros Descuentos", "Total Descuentos", "Líquido a Pago",
         "SIS (Emp)", "Mutual (Emp)", "AFC Emp",
         "Ley 21.735 0,1% CCI", "Ley 21.735 0,9% (Exp. vida / CRP)", "Ley 21.735 2,5% Seguro Social"
     ]
@@ -107,6 +108,8 @@ def generar_libro_remuneraciones(empresa_id, periodo, ruta):  # noqa: C901
             _g(liq, 'colacion'),
             _g(liq, 'asignacion_familiar'),
             _g(liq, 'otros_haberes'),
+            (_g(liq, 'bonos_imponibles') or 0) + (_g(liq, 'aguinaldo') or 0),
+            _g(liq, 'haberes_no_imponibles'),
             _g(liq, 'total_haberes'),
             _g(liq, 'total_imponible'),
             _g(liq, 'afp_monto'),
@@ -116,6 +119,7 @@ def generar_libro_remuneraciones(empresa_id, periodo, ruta):  # noqa: C901
             _g(liq, 'base_tributable'),
             _g(liq, 'impuesto_unico'),
             _g(liq, 'anticipo'),
+            _g(liq, 'otros_descuentos'),
             _g(liq, 'total_descuentos'),
             _g(liq, 'liquido'),
             _g(liq, 'sis_monto'),
@@ -144,7 +148,7 @@ def generar_libro_remuneraciones(empresa_id, periodo, ruta):  # noqa: C901
         cell.border = thin
 
     # Anchos
-    widths = [5, 14, 15, 15, 16, 16, 9, 9, 11, 12, 12, 11, 11, 12, 11,
+    widths = [5, 14, 15, 15, 16, 16, 9, 9, 11, 12, 12, 11, 11, 12, 11, 12, 12, 11,
               12, 12, 10, 10, 11, 10, 12, 11, 11, 12, 12, 14, 11, 10, 12, 14, 14]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -187,7 +191,9 @@ def _agregar_hoja_asiento_centralizacion(wb, emp, periodo, liqs):
     col = _sum("colacion")
     he = _sum("monto_horas_extras")
     af_fam = _sum("asignacion_familiar")
-    otros_h = _sum("otros_haberes")
+    otros_h = _sum("otros_haberes") + _sum("bonos_imponibles") + _sum("aguinaldo")
+    no_imp = _sum("haberes_no_imponibles")
+    otros_desc = _sum("otros_descuentos")
 
     # Aportes empleador
     afc_emp = _sum("afc_empleador")
@@ -245,7 +251,9 @@ def _agregar_hoja_asiento_centralizacion(wb, emp, periodo, liqs):
     if af_fam:
         debe_lineas.append(("ASIGNACION FAMILIAR (por recuperar IPS/CCAF)", af_fam))
     if otros_h:
-        debe_lineas.append(("OTROS HABERES", otros_h))
+        debe_lineas.append(("OTROS HABERES IMPONIBLES (bonos, aguinaldo)", otros_h))
+    if no_imp:
+        debe_lineas.append(("OTROS HABERES NO IMPONIBLES", no_imp))
     if afc_emp:
         debe_lineas.append(("SEGURO DE CESANTIA EMPLEADOR", afc_emp))
     if reforma_afp:
@@ -275,6 +283,8 @@ def _agregar_hoja_asiento_centralizacion(wb, emp, periodo, liqs):
         haber_lineas.append(("IMPUESTO UNICO POR PAGAR", impuesto))
     if anticipos:
         haber_lineas.append(("ANTICIPOS", anticipos))
+    if otros_desc:
+        haber_lineas.append(("OTROS DESCUENTOS (por pagar a terceros)", otros_desc))
     if liquido:
         haber_lineas.append(("REMUNERACIONES POR PAGAR", liquido))
     if mutual:
@@ -962,14 +972,24 @@ def generar_lre_csv(empresa_id, periodo, ruta):
             1143: C.LRE_SALUD.get(C.normalizar(l.get("isapre")), 102) if es_isapre else 102,
             1151: 0 if l.get("pensionado") else 1, 1110: ccaf, 1152: mutual,
             1111: n(l.get("numero_cargas")), 1114: l.get("tramo_asignacion") or l.get("tramo_asignacion_familiar") or "D",
-            1115: n(l.get("dias_trabajados") or 30),
-            2101: n(l.get("sueldo_calculado")), 2102: n(l.get("monto_horas_extras")), 2106: n(l.get("gratificacion")),
+            1115: n(l.get("dias_trabajados") if l.get("dias_trabajados") is not None else 30),
+            1116: n(l.get("dias_licencia")), 1117: n(l.get("dias_vacaciones")),
+            2101: n(l.get("sueldo_calculado")), 2106: n(l.get("gratificacion")),
             2111: n(l.get("otros_haberes")), 2301: n(l.get("colacion")), 2302: n(l.get("movilizacion")),
             2311: n(l.get("asignacion_familiar")),
             3141: n(l.get("afp_monto")), 3143: n(l.get("salud_monto")), 3144: n(l.get("adicional_isapre")),
             3151: n(l.get("afc_trabajador")), 3161: n(l.get("impuesto_unico")), 3188: n(l.get("anticipo")),
             4151: n(l.get("afc_empleador")), 4152: n(l.get("mutual_monto")),
         })
+        detalle = json.loads(l.get("detalle") or "[]")
+        if detalle:
+            for item in detalle:
+                cod = item.get("codigo_lre") or {"Haber imponible": 2113, "Haber no imponible": 2306,
+                                                  "Descuento": 3183}.get(item.get("tipo"), 2113)
+                if cod in v:
+                    v[cod] = (v[cod] or 0) + n(item.get("monto"))
+        else:
+            v[2102] = n(l.get("monto_horas_extras"))
         v[LRE_CODIGO_SEGURO_SOCIAL] += n(l.get("sis_monto")) + n(l.get("reforma_seguro_social")) + n(l.get("reforma_crp"))
         v[LRE_CODIGO_CCI] += n(l.get("reforma_afp_emp"))
         if fin:
@@ -979,12 +999,13 @@ def generar_lre_csv(empresa_id, periodo, ruta):
             v[2314] = n(fin.get("indemnizacion_anos")) - n(fin.get("descuento_afc"))
             v[2315] = n(fin.get("aviso_previo"))
         indemn = v[2313] + v[2314] + v[2315]
-        v[5210] = v[2101] + v[2102] + v[2106] + v[2111]
-        v[5230] = v[2301] + v[2302] + v[2311] + indemn
+        v[5210] = n(l.get("total_imponible"))
+        v[5230] = n(l.get("colacion")) + n(l.get("movilizacion")) + n(l.get("asignacion_familiar")) \
+            + n(l.get("haberes_no_imponibles")) + indemn
         v[5201] = v[5210] + v[5230]
         v[5341] = v[3141] + v[3143] + v[3144] + v[3151]
         v[5361] = v[3161]
-        v[5302] = v[3188]
+        v[5302] = n(l.get("anticipo")) + n(l.get("otros_descuentos"))
         v[5301] = v[5341] + v[5361] + v[5302]
         v[5410] = v[4151] + v[4152] + v[4155] + v[4157]
         v[5502] = indemn

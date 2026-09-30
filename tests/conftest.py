@@ -19,8 +19,7 @@ def base_temporal(tmp_path, monkeypatch):
     if pg:
         monkeypatch.setenv("DATABASE_URL", pg)
         conn = db.get_conn()
-        for t in reversed(list(db.TABLAS)):
-            conn.execute(f"DROP TABLE IF EXISTS {t} CASCADE")
+        conn.execute(f"DROP SCHEMA IF EXISTS {db.schema_pg()} CASCADE")  # solo el schema de BASECON
         conn.commit()
         conn.close()
     else:

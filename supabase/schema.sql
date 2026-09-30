@@ -1,4 +1,7 @@
--- Esquema BASECON v2 para Postgres/Supabase (la app también lo crea sola al iniciar)
+-- Esquema BASECON v2.1 para Postgres/Supabase (la app también lo crea sola al iniciar)
+create schema if not exists basecon;
+set search_path to basecon;
+
 CREATE TABLE IF NOT EXISTS empresas (
         id BIGSERIAL PRIMARY KEY, rut TEXT UNIQUE NOT NULL, razon_social TEXT NOT NULL, giro TEXT,
         direccion TEXT, comuna TEXT, ciudad TEXT, telefono TEXT, email TEXT,
@@ -16,6 +19,7 @@ CREATE TABLE IF NOT EXISTS trabajadores (
         estado_civil TEXT, direccion TEXT, comuna TEXT, email TEXT, telefono TEXT,
         afp TEXT, salud TEXT, isapre TEXT, pactado_salud_uf DOUBLE PRECISION DEFAULT 0,
         cuenta_banco TEXT, banco TEXT, tipo_cuenta TEXT DEFAULT 'RUT',
+        codigo TEXT, cargo TEXT, centro_costo TEXT,
         tramo_asignacion_familiar TEXT DEFAULT 'D', numero_cargas INTEGER DEFAULT 0,
         pensionado INTEGER DEFAULT 0, cotiza_afp INTEGER DEFAULT 1,
         activo INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -62,6 +66,9 @@ CREATE TABLE IF NOT EXISTS liquidaciones (
         reforma_afp_emp DOUBLE PRECISION DEFAULT 0, reforma_crp DOUBLE PRECISION DEFAULT 0,
         reforma_seguro_social DOUBLE PRECISION DEFAULT 0, base_tributable DOUBLE PRECISION,
         impuesto_unico DOUBLE PRECISION DEFAULT 0, anticipo DOUBLE PRECISION DEFAULT 0,
+        aguinaldo DOUBLE PRECISION DEFAULT 0, bonos_imponibles DOUBLE PRECISION DEFAULT 0, haberes_no_imponibles DOUBLE PRECISION DEFAULT 0,
+        otros_descuentos DOUBLE PRECISION DEFAULT 0, dias_licencia DOUBLE PRECISION DEFAULT 0, dias_vacaciones DOUBLE PRECISION DEFAULT 0,
+        detalle TEXT,
         total_descuentos DOUBLE PRECISION, liquido DOUBLE PRECISION, tramo_asignacion TEXT, advertencias TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(empresa_id, trabajador_id, periodo)
@@ -87,9 +94,34 @@ CREATE TABLE IF NOT EXISTS finiquitos (
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS periodos_rrhh (
+        id BIGSERIAL PRIMARY KEY, empresa_id INTEGER NOT NULL REFERENCES empresas(id), periodo TEXT NOT NULL,
+        estado TEXT DEFAULT 'Abierto', enviado_por TEXT, enviado_at TIMESTAMP,
+        UNIQUE(empresa_id, periodo)
+);
+
+CREATE TABLE IF NOT EXISTS conceptos (
+        id BIGSERIAL PRIMARY KEY, empresa_id INTEGER NOT NULL REFERENCES empresas(id), nombre TEXT NOT NULL,
+        tipo TEXT DEFAULT 'Haber imponible', codigo_lre INTEGER, activo INTEGER DEFAULT 1, orden INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS movimientos (
+        id BIGSERIAL PRIMARY KEY, empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+        trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id), periodo TEXT NOT NULL,
+        dias_trabajados DOUBLE PRECISION, ausencias DOUBLE PRECISION DEFAULT 0, licencia DOUBLE PRECISION DEFAULT 0,
+        licencia_desde DATE, licencia_hasta DATE, dias_vacaciones DOUBLE PRECISION DEFAULT 0,
+        anticipo DOUBLE PRECISION DEFAULT 0, aguinaldo DOUBLE PRECISION DEFAULT 0, bono_desempeno DOUBLE PRECISION DEFAULT 0,
+        cant_he_50 DOUBLE PRECISION DEFAULT 0, cant_he_100 DOUBLE PRECISION DEFAULT 0, cant_hd DOUBLE PRECISION DEFAULT 0, cant_hed DOUBLE PRECISION DEFAULT 0,
+        valor_he_50 DOUBLE PRECISION DEFAULT 0, valor_he_100 DOUBLE PRECISION DEFAULT 0, valor_hd DOUBLE PRECISION DEFAULT 0, valor_hed DOUBLE PRECISION DEFAULT 0,
+        colacion DOUBLE PRECISION DEFAULT 0, movilizacion DOUBLE PRECISION DEFAULT 0, extras TEXT, observacion TEXT,
+        updated_by TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(empresa_id, trabajador_id, periodo)
+);
+
 CREATE TABLE IF NOT EXISTS usuarios (
         id BIGSERIAL PRIMARY KEY, usuario TEXT UNIQUE NOT NULL, nombre TEXT, hash TEXT NOT NULL, salt TEXT NOT NULL,
-        rol TEXT DEFAULT 'usuario', empresas TEXT DEFAULT '[]', activo INTEGER DEFAULT 1,
+        rol TEXT DEFAULT 'usuario', empresas TEXT DEFAULT '[]', modulos TEXT DEFAULT '["remuneraciones"]',
+        activo INTEGER DEFAULT 1,
         dias_acceso INTEGER, fecha_expira DATE, primer_acceso DATE, ultimo_acceso DATE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

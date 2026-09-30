@@ -25,6 +25,7 @@ from remu import previred as P
 from remu import seguridad as S
 from remu.pdf_indicadores import parse_indicadores_pdf
 from remu.procesos import calcular_periodo
+import ui_rrhh
 
 _favicon = C.BASE_DIR / "favicon.png"
 if not _favicon.exists():
@@ -72,8 +73,12 @@ def es_admin() -> bool:
     return usuario_actual().get("rol") == "admin"
 
 
+def modulos() -> set[str]:
+    return S.modulos_usuario(usuario_actual())
+
+
 def puede_crear_empresas() -> bool:
-    return S.empresas_permitidas(usuario_actual()) is None
+    return S.empresas_permitidas(usuario_actual()) is None and "remuneraciones" in modulos()
 
 
 def empresas_visibles(conn) -> list[dict]:
@@ -288,6 +293,9 @@ def _form_trabajador(prefix, t=None):
         "Tramo asignación familiar (según IPS/CCAF)", tr,
         index=tr.index(t["tramo_asignacion_familiar"]) if t.get("tramo_asignacion_familiar") in tr else 3,
         key=f"{prefix}_tr", help="Tramo determinado por el promedio de rentas del semestre anterior.")
+    d["codigo"] = c1.text_input("Código interno", value=t.get("codigo") or "", key=f"{prefix}_cod")
+    d["cargo"] = c2.text_input("Cargo", value=t.get("cargo") or "", key=f"{prefix}_cargo")
+    d["centro_costo"] = c3.text_input("Centro de costo", value=t.get("centro_costo") or "", key=f"{prefix}_ccos")
     d["pensionado"] = int(c1.checkbox("Pensionado", value=bool(t.get("pensionado")), key=f"{prefix}_pen",
                                       help="Sin SIS, sin cotización empleador Ley 21.735 y sin seguro de cesantía."))
     d["cotiza_afp"] = int(c2.checkbox("Cotiza en AFP", value=bool(t.get("cotiza_afp", 1)), key=f"{prefix}_cafp",
@@ -314,7 +322,18 @@ def pantalla_trabajadores(conn):
                         st.rerun()
                     except Exception as ex:
                         st.error(f"Error: {ex}")
+    with st.expander("📥 Importar trabajadores desde Excel"):
+        st.caption("Columnas: RUT, NOMBRE (o NOMBRES), AP PATERNO, AP MATERNO, CODIGO, CARGO, CENTRO COSTO. "
+                   "Los RUT que ya existen se omiten. AFP, salud y demás datos previsionales se completan después.")
+        arch = st.file_uploader("Archivo Excel", type=["xlsx", "xls"], key="imp_trab")
+        if arch and st.button("Importar"):
+            n, errs = ui_rrhh.importar_trabajadores_excel(conn, emp, arch)
+            st.success(f"{n} trabajador(es) importado(s).")
+            mostrar_advertencias(errs, "Filas no importadas")
     trabs = db.rows(conn, "SELECT * FROM trabajadores WHERE empresa_id=? ORDER BY apellido_paterno, nombres", (emp["id"],))
+    incompletos = [t for t in trabs if t.get("activo") and not t.get("afp") and t.get("cotiza_afp", 1)]
+    if incompletos and "remuneraciones" in modulos():
+        st.warning(f"{len(incompletos)} trabajador(es) sin AFP registrada: complete sus datos previsionales antes de liquidar.")
     if trabs:
         with st.expander("✏️ Editar trabajador", expanded=False):
             opts = {f"{t['rut']} — {t['nombres']} {t['apellido_paterno']}": t for t in trabs}
@@ -331,7 +350,7 @@ def pantalla_trabajadores(conn):
                         conn.commit()
                         st.success("Trabajador actualizado. Si ya había liquidaciones del mes, vuelva a calcularlas.")
                         st.rerun()
-        df = pd.DataFrame(trabs)[["id", "rut", "nombres", "apellido_paterno", "apellido_materno", "afp", "salud",
+        df = pd.DataFrame(trabs)[["id", "codigo", "rut", "nombres", "apellido_paterno", "apellido_materno", "cargo", "afp", "salud",
                                   "numero_cargas", "tramo_asignacion_familiar", "pensionado", "activo"]]
         st.dataframe(df, width="stretch")
 
@@ -500,14 +519,21 @@ def pantalla_liquidaciones(conn):
     ref = K.tasas_reforma_ley_21735(periodo)
     st.info(f"UF ${ind['uf']:,.2f} · UTM ${ind['utm']:,.0f} · Tope AFP ${ind['tope_afp']:,.0f} · "
             f"{ref['descripcion']}".replace(",", "X").replace(".", ",").replace("X", "."))
-    dias_def = st.number_input("Días trabajados (por defecto)", 0, 30, 30)
+    movs, est = ui_rrhh.resumen_movimientos_para_liquidacion(conn, emp, periodo)
     conts = db.rows(conn, """SELECT c.id, t.id AS tid, t.rut, t.nombres, t.apellido_paterno
                              FROM contratos c JOIN trabajadores t ON c.trabajador_id=t.id
                              WHERE c.empresa_id=? AND c.activo=1""", (emp["id"],))
+    sin_mov = [c for c in conts if c["tid"] not in movs]
+    if movs:
+        (st.success if est.get("estado") != "Abierto" else st.warning)(
+            f"Movimientos RRHH del mes: {len(movs)} trabajador(es) · periodo **{est.get('estado')}**. "
+            + ("El cliente aún no lo envía: puede calcular igual, pero los datos podrían cambiar. "
+               if est.get("estado") == "Abierto" else "") + "Se usan automáticamente al calcular.")
+    dias_def = st.number_input("Días trabajados por defecto (trabajadores sin movimiento)", 0, 30, 30)
     he, ant, dias = {}, {}, {}
-    if conts:
-        with st.expander("Variables del mes por trabajador (días, horas extra, anticipos)"):
-            for c in conts:
+    if sin_mov:
+        with st.expander(f"Variables del mes para {len(sin_mov)} trabajador(es) sin movimiento RRHH"):
+            for c in sin_mov:
                 a, b, d, e = st.columns([3, 1, 1, 1])
                 a.write(f"{c['rut']} — {c['nombres']} {c['apellido_paterno']}")
                 dias[c["tid"]] = b.number_input("Días", 0, 30, int(dias_def), key=f"d_{c['tid']}_{periodo}")
@@ -553,6 +579,10 @@ def pantalla_liquidaciones(conn):
                            mime="application/zip", key="dl_zip_liq")
     for l in liqs:
         with st.expander(f"{l['rut']} — líquido ${C.fmt_clp(l['liquido'])}"):
+            det = json.loads(l.get("detalle") or "[]")
+            if det:
+                st.table(pd.DataFrame(det)[["tipo", "nombre", "monto"]].rename(
+                    columns={"tipo": "Tipo", "nombre": "Concepto", "monto": "Monto"}).astype(str))
             st.write({k: l.get(k) for k in ("total_imponible", "afp_monto", "salud_monto", "salud_ccaf", "adicional_isapre",
                                             "afc_trabajador", "base_tributable", "impuesto_unico", "sis_monto",
                                             "reforma_afp_emp", "reforma_crp", "reforma_seguro_social", "afc_empleador",
@@ -788,19 +818,23 @@ def pantalla_usuarios(conn):
             rol = b.selectbox("Rol", ["usuario", "admin"])
             todas = a.checkbox("Acceso a todas las empresas")
             sel = b.multiselect("Empresas", list(nombres), format_func=lambda i: nombres[i])
+            mods = b.multiselect("Módulos", list(C.MODULOS), default=["remuneraciones"],
+                                 format_func=lambda m: C.MODULOS[m])
             modo = a.selectbox("Plazo de acceso", ["Sin plazo", "Días desde el primer acceso", "Hasta una fecha"])
             dias = b.number_input("Días", 1, 3650, 15)
             fexp = a.date_input("Fecha de expiración", value=date.today())
             if st.form_submit_button("Crear usuario"):
                 try:
-                    S.crear_usuario(u, c, n, rol=rol, empresas="*" if todas else sel,
+                    if rol != "admin" and not mods:
+                        raise ValueError("Asigne al menos un módulo.")
+                    S.crear_usuario(u, c, n, rol=rol, empresas="*" if todas else sel, modulos=mods,
                                     dias_acceso=int(dias) if modo.startswith("Días") else None,
                                     fecha_expira=fexp if modo.startswith("Hasta") else None)
                     st.success("Usuario creado.")
                     st.rerun()
                 except Exception as ex:
                     st.error(str(ex))
-    us = db.rows(conn, "SELECT id, usuario, nombre, rol, empresas, activo, dias_acceso, fecha_expira, primer_acceso, "
+    us = db.rows(conn, "SELECT id, usuario, nombre, rol, empresas, modulos, activo, dias_acceso, fecha_expira, primer_acceso, "
                        "ultimo_acceso FROM usuarios ORDER BY usuario")
     for u in us:
         u["dias_restantes"] = S.dias_restantes(u)
@@ -815,11 +849,16 @@ def pantalla_usuarios(conn):
                 act = [] if x["empresas"] == "*" else json.loads(x["empresas"] or "[]")
                 sel = st.multiselect("Empresas", list(nombres), default=[i for i in act if i in nombres],
                                      format_func=lambda i: nombres[i])
+                try:
+                    mact = [m for m in json.loads(x.get("modulos") or "[]") if m in C.MODULOS]
+                except Exception:
+                    mact = ["remuneraciones"]
+                mods = st.multiselect("Módulos", list(C.MODULOS), default=mact, format_func=lambda m: C.MODULOS[m])
                 nueva = st.text_input("Nueva clave (dejar vacío para mantener)", type="password")
                 reiniciar = st.checkbox("Reiniciar plazo (cuenta desde el próximo acceso)")
                 fexp = st.date_input("Nueva fecha de expiración (opcional)", value=None)
                 if st.form_submit_button("Guardar"):
-                    campos = dict(activo=int(activo), empresas="*" if todas else sel)
+                    campos = dict(activo=int(activo), empresas="*" if todas else sel, modulos=mods)
                     if nueva:
                         campos["clave"] = nueva
                     if reiniciar:
@@ -839,7 +878,15 @@ def pantalla_usuarios(conn):
 def pantalla_ayuda(_conn):
     st.header("Ayuda")
     st.markdown(f"""
-**Versión 2.0** — ver `CAMBIOS.md` para el detalle de correcciones.
+**Versión 2.1** — ver `CAMBIOS.md`.
+
+**Módulos y permisos.** Cada usuario tiene empresas y módulos asignados (menú Usuarios):
+- *Movimientos RRHH*: trabajadores, movimientos del mes (asistencia, licencias, horas extra, anticipos, bonos,
+  conceptos propios) y envío del periodo a remuneraciones.
+- *Remuneraciones*: contratos, indicadores, liquidaciones, libros, Previred, finiquitos y DJ 1887.
+
+**Flujo mensual.** El cliente registra los movimientos y presiona *Enviar a remuneraciones* → la oficina calcula
+las liquidaciones (toma los movimientos automáticamente) → cierra el periodo.
 
 - **Impuesto único** calculado con la tabla mensual en UTM; se refleja en la liquidación, el libro, el LRE (3161) y el 1887.
 - **Gratificación**: por contrato, *Art. 50* (25% con tope 4,75 IMM), monto fijo o sin gratificación.
@@ -869,15 +916,26 @@ def main():
             f"Acceso: quedan {max(0, u['dias_restantes'])} día(s)")
     if LOGO.exists():
         st.sidebar.image(str(LOGO), width="stretch")
-    st.sidebar.markdown(f"**{u.get('nombre') or u.get('usuario')}** · {u.get('rol')}")
+    st.sidebar.markdown(f"**{u.get('nombre') or u.get('usuario')}** · {u.get('rol')}  \n"
+                        + " · ".join(C.MODULOS[m] for m in sorted(modulos())))
 
-    pantallas = {
-        "🏠 Dashboard": pantalla_dashboard, "🏢 Empresas": pantalla_empresas, "👥 Trabajadores": pantalla_trabajadores,
-        "📄 Contratos": pantalla_contratos, "📊 Indicadores": pantalla_indicadores,
-        "💰 Liquidaciones": pantalla_liquidaciones, "📒 Libro de Remuneraciones": pantalla_libro,
-        "🏖 Vacaciones": pantalla_vacaciones, "📝 Finiquitos": pantalla_finiquitos,
-        "📤 Archivo Previred": pantalla_previred, "📋 DJ 1887": pantalla_1887, "ℹ️ Ayuda": pantalla_ayuda,
-    }
+    mods = modulos()
+    ctx = {"selector_empresa": selector_empresa, "input_periodo": input_periodo, "usuario": usuario_actual,
+           "modulos": modulos, "advertencias": mostrar_advertencias}
+    pantallas = {"🏠 Dashboard": pantalla_dashboard}
+    if "remuneraciones" in mods:
+        pantallas["🏢 Empresas"] = pantalla_empresas
+    pantallas["👥 Trabajadores"] = pantalla_trabajadores
+    if "rrhh" in mods or "remuneraciones" in mods:
+        pantallas["🗓 Movimientos del mes"] = lambda c: ui_rrhh.pantalla_movimientos(c, ctx)
+        pantallas["🧩 Conceptos adicionales"] = lambda c: ui_rrhh.pantalla_conceptos(c, ctx)
+    if "remuneraciones" in mods:
+        pantallas.update({
+            "📄 Contratos": pantalla_contratos, "📊 Indicadores": pantalla_indicadores,
+            "💰 Liquidaciones": pantalla_liquidaciones, "📒 Libro de Remuneraciones": pantalla_libro,
+            "🏖 Vacaciones": pantalla_vacaciones, "📝 Finiquitos": pantalla_finiquitos,
+            "📤 Archivo Previred": pantalla_previred, "📋 DJ 1887": pantalla_1887})
+    pantallas["ℹ️ Ayuda"] = pantalla_ayuda
     if es_admin():
         pantallas["🔐 Usuarios"] = pantalla_usuarios
     menu = st.sidebar.radio("Menú", list(pantallas))
@@ -885,7 +943,7 @@ def main():
         st.session_state.clear()
         st.rerun()
 
-    st.title("BASECON · Remuneraciones")
+    st.title("BASECON · Remuneraciones" if "remuneraciones" in mods else "BASECON · Movimientos RRHH")
     conn = db.get_conn()
     try:
         pantallas[menu](conn)

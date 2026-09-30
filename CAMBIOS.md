@@ -1,3 +1,36 @@
+# BASECON v2.1 — Módulo Movimientos RRHH (reemplaza a Control RRHH)
+
+- **Una sola app con permisos por módulo.** En *Usuarios*, cada usuario tiene sus empresas y sus módulos: **Movimientos RRHH** o **Remuneraciones**, o ambos. El administrador ve todo.
+  - Un encargado del cliente con solo Movimientos RRHH ve: Dashboard, Trabajadores, Movimientos del mes, Conceptos adicionales y Ayuda.
+- **Movimientos del mes.** Es una planilla por empresa y mes, con:
+  - días trabajados, ausencias y licencia (días y fechas);
+  - vacaciones y anticipo;
+  - aguinaldo y bono de desempeño;
+  - horas extra al 50% y al 100%, horas domingo y horas extra domingo (cantidad, o valor en pesos si el cliente lo informa);
+  - colación y movilización del mes;
+  - observación;
+  - una columna por cada concepto propio de la empresa.
+  
+  Incluye totales, validaciones y exportación a Excel.
+- **Estados del periodo:** Abierto → *Enviar a remuneraciones* (cliente) → Cerrado (oficina). Un periodo enviado ya no lo puede modificar el cliente; la oficina puede reabrirlo.
+- **Conceptos adicionales por empresa.** Cada concepto tiene un tipo (haber imponible, no imponible o descuento) y un código LRE. Ejemplos: bono metas (2113), viático (2303), préstamo (3183).
+- **Liquidaciones automáticas.** Al calcular, se toman los movimientos:
+  - días trabajados;
+  - horas extra (valor hora = sueldo ÷ (jornada × 30/7), con recargos de 1,5, 2,0, 0,3 en domingo (art. 38) y 2,0; editables en `remu/config.py`);
+  - aguinaldo, bonos y conceptos imponibles, que entran también a la base de la gratificación del art. 50;
+  - haberes no imponibles, anticipo y otros descuentos.
+  
+  La liquidación en Word muestra cada concepto.
+- **LRE:** cada concepto va a su código (2110, 2113, 2107, 2303, 3183, 3188, etc.), con días de licencia (1116) y de vacaciones (1117).
+- **Previred:** la licencia médica se informa como movimiento 3, con fechas y renta imponible del mes anterior (campo 92).
+- **Libro y centralización:** columnas y líneas nuevas para bonos, no imponibles y otros descuentos. El asiento sigue cuadrando.
+- **Importación de trabajadores desde Excel,** en el mismo formato de Control RRHH. Los trabajadores tienen ahora código, cargo y centro de costo.
+- **Supabase compartido con Control RRHH.** BASECON crea sus tablas en el schema `basecon`, separado de las tablas de Control RRHH que están en `public`. Probado: no toca las tablas existentes.
+  - Ese schema no se expone a la API pública de Supabase.
+  - Cuando se deje de usar el `index.html` de Control RRHH, las tablas antiguas de prueba se pueden borrar con `supabase/limpiar_control_rrhh_antiguo.sql`.
+- **Supabase siempre activo:** `.github/workflows/mantener-supabase-activo.yml` consulta la base cada 3 días. Requiere el secret `SUPABASE_DB_URL` en GitHub.
+- **Pruebas:** 45 casos, que pasan en SQLite y en Postgres.
+
 # BASECON v2.0 — Cambios respecto de la v1
 
 Las correcciones están ordenadas según los 14 puntos de la revisión. Las pruebas automáticas (`pytest`, 39 casos) pasan en SQLite y en Postgres.

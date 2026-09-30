@@ -1,6 +1,7 @@
 """Documentos Word: contrato, liquidación, comprobante de feriado y finiquito."""
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from docx import Document
@@ -171,7 +172,12 @@ def generar_liquidacion_docx(empresa, trabajador, liq, periodo, ruta, indicadore
         + float(liq.get("adicional_isapre") or 0)
         + float(liq.get("afc_trabajador") or 0)
     )
-    otros_desc = float(liq.get("anticipo") or liq.get("otros_descuentos") or 0)
+    detalle = liq.get("detalle") or []
+    if isinstance(detalle, str):
+        detalle = json.loads(detalle or "[]")
+    anticipo = float(liq.get("anticipo") or 0)
+    desc_det = [d for d in detalle if d.get("tipo") == "Descuento"]
+    otros_desc = anticipo + sum(float(d["monto"]) for d in desc_det)
     total_desc = float(liq.get("total_descuentos") or (total_imposicion + otros_desc + float(liq.get("impuesto_unico") or 0)))
 
     haberes_rows = [
@@ -180,7 +186,11 @@ def generar_liquidacion_docx(empresa, trabajador, liq, periodo, ruta, indicadore
     ]
     if float(liq.get("gratificacion") or 0) > 0:
         haberes_rows.append(("GRATIFICACION LEGAL", _fmt_clp(liq.get("gratificacion"))))
-    if float(liq.get("monto_horas_extras") or 0) > 0:
+    imp_det = [d for d in detalle if d.get("tipo") == "Haber imponible"]
+    if imp_det:
+        for d in imp_det:
+            haberes_rows.append((str(d["nombre"]).upper()[:34], _fmt_clp(d["monto"])))
+    elif float(liq.get("monto_horas_extras") or 0) > 0:
         haberes_rows.append(("HORAS EXTRAS", _fmt_clp(liq.get("monto_horas_extras"))))
     if float(liq.get("otros_haberes") or 0) > 0:
         haberes_rows.append(("OTROS HABERES IMPONIBLES", _fmt_clp(liq.get("otros_haberes"))))
@@ -191,6 +201,9 @@ def generar_liquidacion_docx(empresa, trabajador, liq, periodo, ruta, indicadore
         haberes_rows.append(("COLACION", _fmt_clp(liq.get("colacion"))))
     if float(liq.get("asignacion_familiar") or 0) > 0:
         haberes_rows.append(("ASIGNACION FAMILIAR", _fmt_clp(liq.get("asignacion_familiar"))))
+    for d in detalle:
+        if d.get("tipo") == "Haber no imponible":
+            haberes_rows.append((str(d["nombre"]).upper()[:34], _fmt_clp(d["monto"])))
 
     desc_rows = []
     if tasa_afp:
@@ -205,8 +218,11 @@ def generar_liquidacion_docx(empresa, trabajador, liq, periodo, ruta, indicadore
     desc_rows.append(("TOTAL IMPOSICION", _fmt_clp(total_imposicion)))
     iu = float(liq.get("impuesto_unico") or 0)
     desc_rows.append(("IMPUESTO UNICO", _fmt_clp(iu)))
+    if anticipo > 0:
+        desc_rows.append(("ANTICIPO", _fmt_clp(anticipo)))
+    for d in desc_det:
+        desc_rows.append((str(d["nombre"]).upper()[:34], _fmt_clp(d["monto"])))
     if otros_desc > 0:
-        desc_rows.append(("ANTICIPO 1", _fmt_clp(otros_desc)))
         desc_rows.append(("TOTAL OTROS DESCUENTOS", _fmt_clp(otros_desc)))
 
     n = max(len(haberes_rows), len(desc_rows))

@@ -67,6 +67,10 @@ def linea_previred(liq: dict, trab: dict, contrato: dict, empresa: dict, periodo
     else:
         tipo_trab = "0"
     mov, fdesde, fhasta = codigo_movimiento(contrato, periodo)
+    if mov == "0" and float(liq.get("dias_licencia") or 0) > 0:
+        mov = "3"  # subsidio por licencia médica
+        fdesde = C.fecha_ddmmaaaa(liq.get("_licencia_desde"))
+        fhasta = C.fecha_ddmmaaaa(liq.get("_licencia_hasta"))
     jornada = int(contrato.get("jornada_semanal") or C.JORNADA_DEFAULT)
     ccaf = C.PREVIRED_CCAF.get(C.normalizar(empresa.get("caja_compensacion")), "00")
     mutual = C.PREVIRED_MUTUAL.get(C.normalizar(empresa.get("mutual")), "01")
@@ -97,6 +101,7 @@ def linea_previred(liq: dict, trab: dict, contrato: dict, empresa: dict, periodo
         81: _n(liq.get("adicional_isapre")) if es_isapre else "0",
         83: ccaf, 84: _n(base_afp) if ccaf != "00" else "0",
         90: _n(liq.get("salud_ccaf")),
+        92: _n(liq.get("_rima")) if mov == "3" else "0",
         93: "2" if jornada <= 30 else "1",
         96: mutual, 97: _n(base_afp) if mutual != "00" else "0",
         98: _n(liq.get("mutual_monto")) if mutual != "00" else "0",
@@ -133,6 +138,14 @@ def generar_previred_txt(empresa_id, periodo, ruta) -> dict:
             WHERE l.empresa_id = ? AND l.periodo = ?""", (empresa_id, periodo))
         trabs = {t["id"]: t for t in db.rows(conn, "SELECT * FROM trabajadores WHERE empresa_id=?", (empresa_id,))}
         ind = db.get_indicadores(periodo, conn) or {}
+        movs = {m["trabajador_id"]: m for m in db.rows(
+            conn, "SELECT trabajador_id, licencia_desde, licencia_hasta FROM movimientos WHERE empresa_id=? AND periodo=?",
+            (empresa_id, periodo))}
+        a, m_ = int(periodo[:4]), int(periodo[5:7])
+        per_ant = f"{a - 1}-12" if m_ == 1 else f"{a}-{m_ - 1:02d}"
+        ant = {x["trabajador_id"]: x for x in db.rows(
+            conn, "SELECT trabajador_id, total_imponible FROM liquidaciones WHERE empresa_id=? AND periodo=?",
+            (empresa_id, per_ant))}
     finally:
         conn.close()
     errores, lineas = [], []
@@ -150,7 +163,15 @@ def generar_previred_txt(empresa_id, periodo, ruta) -> dict:
                 errores.append(f"{nombre or t.get('rut')}: falta {etiqueta}.")
         if not t.get("apellido_materno"):
             errores.append(f"{nombre}: falta apellido materno (Previred exige al menos 2 letras).")
-        liq = dict(liq, reforma_etapa=etapa, _tope_afp=ind.get("tope_afp"), _tope_afc=ind.get("tope_afc"))
+        mv = movs.get(liq["trabajador_id"]) or {}
+        dl = float(liq.get("dias_licencia") or 0)
+        rima = float((ant.get(liq["trabajador_id"]) or {}).get("total_imponible") or 0) * dl / 30.0
+        if dl and not (mv.get("licencia_desde") and mv.get("licencia_hasta")):
+            errores.append(f"{nombre}: licencia de {dl:g} días sin fechas desde/hasta (Previred las exige).")
+        if dl and not rima:
+            errores.append(f"{nombre}: sin liquidación del mes anterior para la renta imponible de la licencia (campo 92).")
+        liq = dict(liq, reforma_etapa=etapa, _tope_afp=ind.get("tope_afp"), _tope_afc=ind.get("tope_afc"),
+                   _licencia_desde=mv.get("licencia_desde"), _licencia_hasta=mv.get("licencia_hasta"), _rima=rima)
         contrato = {"fecha_inicio": liq.get("fecha_inicio"), "fecha_termino": liq.get("fecha_termino"),
                     "tipo_contrato": liq.get("tipo_contrato"), "jornada_semanal": liq.get("jornada_semanal"),
                     "activo": liq.get("contrato_activo", 1)}
