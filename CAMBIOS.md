@@ -1,0 +1,104 @@
+# BASECON v2.0 — Cambios respecto de la v1
+
+Las correcciones están ordenadas según los 14 puntos de la revisión. Las pruebas automáticas (`pytest`, 39 casos) pasan en SQLite y en Postgres.
+
+## Estructura (puntos 13 y 14)
+El archivo único de 3.800 líneas quedó dividido así:
+
+| Archivo | Contenido |
+|---|---|
+| `app.py` | Solo la interfaz Streamlit (pantallas). |
+| `remu/config.py` | Parámetros legales, tablas de códigos (Previred, LRE, causales), feriados y utilidades. |
+| `remu/db.py` | Conexión SQLite/Postgres con pool, esquema único, migraciones y upserts `ON CONFLICT`. |
+| `remu/calculos.py` | Liquidación e impuesto único. Son funciones puras que se pueden probar. |
+| `remu/finiquitos.py` | Motor de finiquitos. |
+| `remu/documentos.py` | Contrato, liquidación, comprobante de feriado y finiquito (Word). |
+| `remu/libros.py` | Libro Excel, centralización, LRE, Formulario 1887, CSV SII y certificados. |
+| `remu/previred.py` | Archivo Previred de 105 campos. |
+| `remu/seguridad.py` | Usuarios, claves y plazos de acceso. |
+| `remu/procesos.py` | Cálculo del mes completo. |
+| `tests/` | Pruebas automáticas. |
+
+- En Postgres ya no se abre una conexión nueva por consulta: la app usa un pool y `close()` devuelve la conexión.
+- Se eliminó la reescritura de SQL "por casos". Todos los upserts usan `INSERT … ON CONFLICT`, que funciona igual en ambos motores.
+- La app crea y migra por sí sola las tablas en Postgres. `supabase/schema.sql` se generó desde el mismo esquema.
+- Corregido: `read_sql_df` no adaptaba los `?` en Postgres, así que las pantallas con filtro fallaban en Supabase.
+- Corregido: en Postgres fallaban `GROUP_CONCAT` y un `GROUP BY` incompleto del 1887.
+- Corregido: el LRE consultaba la columna inexistente `t.tramo_af` y se caía siempre.
+
+## 1. Impuesto único
+- Se aplica la tabla mensual en UTM (8 tramos, factor y rebaja). La base es el imponible menos AFP, salud 7% y AFC del trabajador. El adicional de Isapre no rebaja la base, y en la v1 sí la rebajaba.
+- El impuesto se guarda en la liquidación y se descuenta del líquido. Aparece en el Word, en el libro Excel, en la centralización (Haber "Impuesto único por pagar"), en el LRE (3161) y en el 1887.
+- El 1887 informa ahora la renta total neta como base tributable actualizada, no como total imponible. El impuesto también va actualizado. La jornada ya no queda fija en 45 horas: se toma del contrato.
+- La centralización ya no absorbe diferencias en "Remuneraciones por pagar": solo corrige redondeos de ±$2. Una diferencia mayor queda a la vista.
+
+## 2. Previred
+- Se generan los 105 campos del formato largo variable v82: códigos de AFP, Isapre, CCAF y mutual, movimiento de personal (contratación y retiro con fechas), tipo de trabajador, tramo y cargas, CCAF, mutual/ISL, AFC y tipo de jornada.
+- Ley 21.735:
+  - Hasta julio de 2026: campo 29 = SIS y campo 94 = expectativa de vida 0,9%.
+  - Desde agosto de 2026: campo 29 = Seguro Social 2,5% y campo 95 = rentabilidad protegida 0,9%.
+  - El 0,1% a cuenta individual se suma al campo 28.
+- Antes de generar, valida el RUT (módulo 11) y los nombres, e informa los errores.
+- **Validar con el validador de Previred antes de la primera carga.** Los destinos de la reforma están parametrizados al inicio de `remu/previred.py`.
+
+## 3. Finiquitos
+- Base del art. 172: sueldo, gratificación, promedio de variables, colación y movilización. Tope de 90 UF.
+- Años de servicio: se cuentan completos y se suma uno si la fracción supera 6 meses. Tope de 11 años. Se exige un año como mínimo.
+- Aviso previo en las causales del art. 161 cuando no se dio aviso. Se agregó el desahucio (161 inc. 2), además de otras causales, con su código LRE.
+- Feriado proporcional desde el último aniversario, más los días pendientes informados, convertidos a días corridos con la tabla de feriados (editable).
+- Descuento del aporte AFC del empleador, con tope en la indemnización por años de servicio. La app sugiere el monto a partir de las liquidaciones.
+- **Vista previa antes de confirmar.** El contrato y el trabajador se cierran solo al confirmar. El trabajador se desactiva únicamente si no tiene otro contrato activo.
+- El finiquito se registra en el LRE del mes (1103, 1104, 2313, 2314 y 2315).
+
+## 4. Indicadores que se pisaban
+`init_db()` corre una sola vez (`st.cache_resource`) y usa `ON CONFLICT DO NOTHING`, así que ya no reescribe agosto 2026. Guardar desde el PDF conserva los valores que no se pudieron leer, y ya no se inventa una UTM por defecto.
+
+## 5 a 9. Parámetros y validaciones
+- **Jornada:** la máxima legal depende de la fecha (Ley 21.561: 44, 42 y 40 horas). El valor por defecto es 42 horas. La app avisa si un contrato o una liquidación la supera.
+- **Gratificación por contrato:**
+  - art. 50 (25% con tope de 4,75 IMM al año, pagada mensualmente);
+  - monto fijo;
+  - sin gratificación.
+- **Asignación familiar:** se usa el tramo que asigna el IPS o la CCAF, registrado en la ficha del trabajador. Los montos se editan por periodo en Indicadores.
+- **Ley 21.735:**
+  - Desde agosto de 2026 el SIS va dentro del 2,5%. Ya no se duplica: en la v1 el 2,5% se contaba dos veces en el libro y en la centralización.
+  - Pensionados y trabajadores de 65 años o más no pagan SIS ni cotización del empleador.
+- **Seguro de cesantía:**
+  - Contratos de obra o faena pagan 3% del empleador, igual que plazo fijo; en la v1 se les cobraba la tasa de contrato indefinido.
+  - Pensionados y menores de 18 años están exentos.
+  - Con más de 11 años de relación laboral, el empleador paga 0,8%.
+- **CCAF:** se separa la parte del 7% Fonasa que va a la caja. La tasa es editable y por defecto es 5,2%, según el campo 90 del instructivo Previred.
+- **Advertencias:** sueldo bajo el ingreso mínimo (proporcional en jornada parcial), jornada sobre la máxima, líquido negativo, tramo de asignación familiar estimado y falta de UTM.
+
+## 10. Documentos
+- Fechas en español sin depender del idioma del servidor.
+- El finiquito incluye:
+  - detalle de cada concepto y del descuento AFC;
+  - declaración de cotizaciones pagadas (art. 162);
+  - reserva de derechos;
+  - ratificación ante ministro de fe (art. 177).
+- La liquidación muestra el impuesto único y separa los haberes imponibles de los no imponibles.
+- Contrato con cláusula de gratificación art. 50 y jornada vigente.
+
+## 11 y 12. Seguridad
+- No hay claves por defecto. En el primer uso se crea el administrador.
+- Usuarios con clave PBKDF2 con sal, rol y empresas asignadas. Cada usuario ve solo sus empresas.
+- Plazo de acceso por usuario: por días desde el primer acceso o hasta una fecha.
+- Se detecta si el reloj del equipo se retrocede.
+- Tras 5 intentos fallidos, el login se bloquea 30 segundos.
+- Con `BASECON_SECRET` definido, cualquier cambio manual en la base a permisos o plazos invalida el acceso.
+- En Streamlit Cloud sin `DATABASE_URL`, la app muestra una alerta porque los datos se pierden al reiniciar.
+- Se eliminó la carga automática de las dos empresas reales de ejemplo en instalaciones nuevas.
+
+## Pendiente de validar con la fuente oficial
+- La asignación del 0,1% de la cuenta individual y del Seguro Social en Previred (campos 28, 29, 94 y 95) y en el LRE (4155 y 4157). No hay instrucción publicada; se usa el criterio de los proveedores de software.
+- Las tasas AFP, el valor del IMM, los tramos de asignación familiar y la tabla de feriados deben revisarse cada periodo en la pantalla Indicadores.
+
+## Migración desde la v1
+Copie la carpeta `remu/` y `app.py` sobre la instalación actual y conserve `data/`. Al iniciar, la app agrega las columnas nuevas sin borrar datos. El primer ingreso pide crear el administrador.
+
+Después, en cada empresa, complete:
+- el código de región y el de comuna (LRE);
+- la CCAF.
+
+Y en cada contrato, el tipo de gratificación. **Vuelva a calcular las liquidaciones de agosto 2026 en adelante:** las de la v1 no tienen impuesto único y duplican el 2,5%.
