@@ -33,9 +33,12 @@ ACCESS_CONFIG_PATH = BASE_DIR / "data" / "acceso_demo.json"
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
 
+_favicon = BASE_DIR / "favicon.png"
+if not _favicon.exists():
+    _favicon = BASE_DIR / "basecon-logo.png"
 st.set_page_config(
     page_title="BASECON — Remuneraciones Chile",
-    page_icon="🇨🇱",
+    page_icon=str(_favicon) if _favicon.exists() else "🇨🇱",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -225,12 +228,180 @@ def panel_admin_acceso():
         f"expira fija={cfg.get('fecha_expira') or '—'}"
     )
 
+def _database_url():
+    """Lee DATABASE_URL desde env o secrets de Streamlit (Supabase / Postgres)."""
+    url = os.environ.get("DATABASE_URL") or ""
+    if not url:
+        try:
+            url = st.secrets.get("DATABASE_URL", "") or ""
+        except Exception:
+            url = ""
+    return (url or "").strip()
+
+
+def _is_postgres():
+    url = _database_url().lower()
+    return bool(url) and ("postgres" in url or "supabase" in url)
+
+
+def _adapt_sql(sql: str) -> str:
+    """Adapta SQL estilo SQLite a Postgres cuando corresponde."""
+    if not _is_postgres():
+        return sql
+    s = sql
+    # Placeholders
+    s = s.replace("?", "%s")
+    # Upserts comunes
+    s = s.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+    s = s.replace("INSERT OR REPLACE INTO", "INSERT INTO")
+    # Tipos SQLite en DDL (por si se llama init local-style)
+    s = s.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    s = s.replace("REAL", "DOUBLE PRECISION")
+    return s
+
+
+class _PgCursor:
+    """Cursor compatible con el uso sqlite (fetchone/fetchall + lastrowid)."""
+
+    def __init__(self, cur, conn_wrapper):
+        self._cur = cur
+        self._conn = conn_wrapper
+        self.lastrowid = None
+
+    def execute(self, sql, params=None):
+        sql2 = _adapt_sql(sql)
+        # INSERT OR REPLACE / OR IGNORE → ON CONFLICT (solo casos conocidos)
+        sql2 = self._rewrite_upserts(sql2, sql)
+        params = params or ()
+        self._cur.execute(sql2, params)
+        # lastrowid tras INSERT
+        if sql2.lstrip().upper().startswith("INSERT") and self._cur.description is None:
+            try:
+                self._cur.execute("SELECT lastval()")
+                row = self._cur.fetchone()
+                self.lastrowid = int(row[0]) if row else None
+            except Exception:
+                self.lastrowid = None
+        return self
+
+    def _rewrite_upserts(self, sql2, original):
+        up = original.upper()
+        # indicadores por periodo
+        if "INSERT OR REPLACE INTO INDICADORES" in up or (
+            "INSERT INTO INDICADORES" in up and "OR REPLACE" in up
+        ):
+            if "ON CONFLICT" not in sql2.upper():
+                sql2 = sql2.rstrip().rstrip(";") + (
+                    " ON CONFLICT (periodo) DO UPDATE SET "
+                    "uf=EXCLUDED.uf, utm=EXCLUDED.utm, tope_afp=EXCLUDED.tope_afp, "
+                    "tope_afc=EXCLUDED.tope_afc, tope_inp=EXCLUDED.tope_inp, "
+                    "sis_tasa=EXCLUDED.sis_tasa, renta_minima=EXCLUDED.renta_minima, "
+                    "afp_tasas=EXCLUDED.afp_tasas"
+                )
+        elif "INSERT OR IGNORE INTO INDICADORES" in up:
+            if "ON CONFLICT" not in sql2.upper():
+                sql2 = sql2.rstrip().rstrip(";") + " ON CONFLICT (periodo) DO NOTHING"
+        # factores_actualizacion
+        elif "FACTORES_ACTUALIZACION" in up and "INSERT" in up:
+            if "ON CONFLICT" not in sql2.upper():
+                if "OR REPLACE" in up or "OR IGNORE" not in up:
+                    # REPLACE default for factores when OR REPLACE
+                    if "OR REPLACE" in up:
+                        sql2 = sql2.rstrip().rstrip(";") + (
+                            " ON CONFLICT (anio_rentas, mes) DO UPDATE SET factor=EXCLUDED.factor"
+                        )
+                    else:
+                        sql2 = sql2.rstrip().rstrip(";") + " ON CONFLICT (anio_rentas, mes) DO NOTHING"
+                else:
+                    sql2 = sql2.rstrip().rstrip(";") + " ON CONFLICT (anio_rentas, mes) DO NOTHING"
+        # liquidaciones
+        elif "INSERT OR REPLACE INTO LIQUIDACIONES" in up or (
+            "INSERT INTO LIQUIDACIONES" in up and "OR REPLACE" in up
+        ):
+            if "ON CONFLICT" not in sql2.upper():
+                sql2 = sql2.rstrip().rstrip(";") + (
+                    " ON CONFLICT (empresa_id, trabajador_id, periodo) DO UPDATE SET "
+                    "contrato_id=EXCLUDED.contrato_id, dias_trabajados=EXCLUDED.dias_trabajados, "
+                    "horas_extras=EXCLUDED.horas_extras, monto_horas_extras=EXCLUDED.monto_horas_extras, "
+                    "sueldo_base=EXCLUDED.sueldo_base, sueldo_calculado=EXCLUDED.sueldo_calculado, "
+                    "gratificacion=EXCLUDED.gratificacion, movilizacion=EXCLUDED.movilizacion, "
+                    "colacion=EXCLUDED.colacion, asignacion_familiar=EXCLUDED.asignacion_familiar, "
+                    "otros_haberes=EXCLUDED.otros_haberes, total_haberes=EXCLUDED.total_haberes, "
+                    "total_imponible=EXCLUDED.total_imponible, afp_monto=EXCLUDED.afp_monto, "
+                    "salud_monto=EXCLUDED.salud_monto, adicional_isapre=EXCLUDED.adicional_isapre, "
+                    "sis_monto=EXCLUDED.sis_monto, afc_trabajador=EXCLUDED.afc_trabajador, "
+                    "afc_empleador=EXCLUDED.afc_empleador, mutual_monto=EXCLUDED.mutual_monto, "
+                    "reforma_afp_emp=EXCLUDED.reforma_afp_emp, reforma_crp=EXCLUDED.reforma_crp, "
+                    "reforma_seguro_social=EXCLUDED.reforma_seguro_social, "
+                    "total_descuentos=EXCLUDED.total_descuentos, liquido=EXCLUDED.liquido, "
+                    "base_tributable=EXCLUDED.base_tributable, anticipo=EXCLUDED.anticipo"
+                )
+        return sql2
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+    def close(self):
+        try:
+            self._cur.close()
+        except Exception:
+            pass
+
+
+class _PgConn:
+    """Conexión Postgres con API parecida a sqlite3 (execute + commit + close)."""
+
+    def __init__(self, dsn: str):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+
+        # Asegurar SSL en Supabase
+        if "sslmode" not in dsn and "supabase" in dsn:
+            dsn = dsn + ("&" if "?" in dsn else "?") + "sslmode=require"
+        self._conn = psycopg2.connect(dsn)
+        self._conn.autocommit = False
+        self._RealDictCursor = RealDictCursor
+
+    def cursor(self):
+        cur = self._conn.cursor(cursor_factory=self._RealDictCursor)
+        return _PgCursor(cur, self)
+
+    def execute(self, sql, params=None):
+        cur = self.cursor()
+        return cur.execute(sql, params)
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+    # pandas / DBAPI
+    def cursor_raw(self):
+        return self._conn.cursor()
+
+
 def get_conn():
+    """SQLite local o Postgres (Supabase) según DATABASE_URL."""
+    if _is_postgres():
+        return _PgConn(_database_url())
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def init_db():
+    """Inicializa esquema. En Postgres se asume schema.sql ya ejecutado en Supabase."""
+    if _is_postgres():
+        _init_db_postgres_seed()
+        return
+
     conn = get_conn()
     c = conn.cursor()
 
@@ -491,6 +662,85 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+
+def _row_count(row):
+    if row is None:
+        return 0
+    try:
+        if isinstance(row, dict) or hasattr(row, "keys"):
+            # RealDictRow / dict
+            for k in ("n", "count", "COUNT"):
+                if k in row:
+                    return int(row[k])
+            return int(list(row.values())[0])
+        return int(row[0])
+    except Exception:
+        return 0
+
+
+def read_sql_df(sql, conn, params=None):
+    """pd.read_sql compatible con SQLite y Postgres (_PgConn)."""
+    raw = conn._conn if isinstance(conn, _PgConn) else conn
+    if params is not None:
+        return pd.read_sql(sql, raw, params=params)
+    return pd.read_sql(sql, raw)
+
+
+def _init_db_postgres_seed():
+    """Solo datos base en Postgres (tablas creadas con supabase/schema.sql)."""
+    import json as _json
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT COUNT(*) AS n FROM empresas").fetchone()
+        if _row_count(row) == 0:
+            conn.execute("""
+            INSERT INTO empresas (rut, razon_social, direccion, comuna, ciudad, telefono, mutual, tasa_mutual, representante_legal, rut_representante)
+            VALUES
+            ('76.065.376-4', 'I PROPIEDADES LIMITADA', 'LOS ABEDULES 3090', 'VITACURA', 'SANTIAGO', '224349552', 'ACHS', 0.93, 'Representante Legal', '11.111.111-1'),
+            ('77.217.854-9', 'INVERSIONES AGROTURISMO Y ECOTURISMO LOS PUENTES SpA', 'Camino Las Parcelas, Parcela N° 24', 'ISLA DE MAIPO', 'ISLA DE MAIPO', '', 'ACHS', 0.93, 'CARLOS EUGENIO VELASCO CAVERLOTTY', '8.377.242-5')
+            """)
+        afp_tasas = _json.dumps({
+            "Capital": 11.44, "Cuprum": 11.44, "Habitat": 11.27,
+            "PlanVital": 11.16, "Provida": 11.45, "Modelo": 10.58, "Uno": 10.46
+        })
+        conn.execute(
+            "INSERT OR IGNORE INTO indicadores (periodo, uf, utm, tope_afp, tope_afc, tope_inp, sis_tasa, renta_minima, afp_tasas) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("2026-07", 40844.79, 71649, 3676031, 5522216, 2449219, 1.88, 553553, afp_tasas),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO indicadores (periodo, uf, utm, tope_afp, tope_afc, tope_inp, sis_tasa, renta_minima, afp_tasas) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("2026-08", 40864.55, 71649, 3676031, 5522215, 2450687, 0.0, 553553, afp_tasas),
+        )
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM factores_actualizacion WHERE anio_rentas = 2025"
+        ).fetchone()
+        if _row_count(row) == 0:
+            factores_2025 = {
+                1: 1.026, 2: 1.022, 3: 1.016, 4: 1.014, 5: 1.012, 6: 1.017,
+                7: 1.008, 8: 1.007, 9: 1.003, 10: 1.003, 11: 1.000, 12: 1.000,
+            }
+            for mes, fac in factores_2025.items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO factores_actualizacion (anio_rentas, mes, factor) VALUES (?,?,?)",
+                    (2025, mes, fac),
+                )
+            for mes in range(1, 13):
+                conn.execute(
+                    "INSERT OR IGNORE INTO factores_actualizacion (anio_rentas, mes, factor) VALUES (?,?,?)",
+                    (2026, mes, 1.0),
+                )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        print(f"[BASECON] Aviso init Postgres: {e}")
+
 
 init_db()
 
@@ -1462,7 +1712,7 @@ def generar_previred_txt(empresa_id, periodo, ruta):
                c.tipo_contrato, c.fecha_inicio, e.rut as empresa_rut, e.razon_social
         FROM liquidaciones l
         JOIN trabajadores t ON l.trabajador_id = t.id
-        JOIN contratos c ON l.contrato_id = c.id
+        LEFT JOIN contratos c ON l.contrato_id = c.id
         JOIN empresas e ON l.empresa_id = e.id
         WHERE l.empresa_id = ? AND l.periodo = ?
     """, (empresa_id, periodo)).fetchall()
@@ -1471,31 +1721,51 @@ def generar_previred_txt(empresa_id, periodo, ruta):
     if not liqs:
         return None
 
+    def _n(v):
+        try:
+            return str(int(round(float(v or 0))))
+        except (TypeError, ValueError):
+            return "0"
+
     lineas = []
+    omitidos = 0
     for liq in liqs:
-        rut = liq['rut'].replace(".", "").replace("-", "")
-        dv = rut[-1]
+        liq = dict(liq)
+        rut_raw = (liq.get("rut") or "").strip()
+        rut = rut_raw.replace(".", "").replace("-", "").replace(" ", "")
+        if len(rut) < 2:
+            omitidos += 1
+            continue
+        dv = rut[-1].upper()
         rut_num = rut[:-1]
-        ap_pat = (liq['apellido_paterno'] or "")[:30]
-        ap_mat = (liq['apellido_materno'] or "")[:30]
-        nombres = (liq['nombres'] or "")[:30]
+        # Solo dígitos en el cuerpo del RUT
+        if not rut_num.isdigit():
+            omitidos += 1
+            continue
+        ap_pat = (liq.get("apellido_paterno") or "")[:30]
+        ap_mat = (liq.get("apellido_materno") or "")[:30]
+        nombres = (liq.get("nombres") or "")[:30]
+        per = (liq.get("periodo") or periodo or "").replace("-", "")
+        salud_tot = float(liq.get("salud_monto") or 0) + float(liq.get("adicional_isapre") or 0)
         # Campos mínimos del formato Previred (simplificado para prototipo)
-        # En producción se deben mapear los 105 campos exactos
         campos = [
             rut_num, dv, ap_pat, ap_mat, nombres,
-            liq['periodo'].replace("-", ""),  # periodo
-            str(int(liq['total_imponible'])),  # renta imponible
-            str(int(liq['afp_monto'])),        # cotización AFP
-            str(int(liq['salud_monto'] + liq['adicional_isapre'])),  # salud
-            str(int(liq['sis_monto'])),        # SIS
-            str(int(liq['afc_trabajador'])),   # AFC trab
-            str(int(liq['afc_empleador'])),    # AFC emp
-            str(int(liq['mutual_monto'])),     # mutual
-            liq['afp'] or "Provida",
-            liq['salud'] or "FONASA",
-            "0",  # días licencia etc.
+            per,
+            _n(liq.get("total_imponible")),
+            _n(liq.get("afp_monto")),
+            _n(salud_tot),
+            _n(liq.get("sis_monto")),
+            _n(liq.get("afc_trabajador")),
+            _n(liq.get("afc_empleador")),
+            _n(liq.get("mutual_monto")),
+            liq.get("afp") or "Provida",
+            liq.get("salud") or "FONASA",
+            "0",
         ]
         lineas.append(";".join(campos))
+
+    if not lineas:
+        return None
 
     with open(ruta, "w", encoding="utf-8") as f:
         f.write("\n".join(lineas))
@@ -2556,17 +2826,17 @@ def main():
     if menu == "🏠 Dashboard":
         st.header("Dashboard")
         col1, col2, col3, col4 = st.columns(4)
-        n_emp = conn.execute("SELECT COUNT(*) FROM empresas").fetchone()[0]
-        n_trab = conn.execute("SELECT COUNT(*) FROM trabajadores WHERE activo=1").fetchone()[0]
-        n_liq = conn.execute("SELECT COUNT(*) FROM liquidaciones").fetchone()[0]
-        n_fin = conn.execute("SELECT COUNT(*) FROM finiquitos").fetchone()[0]
+        n_emp = _row_count(conn.execute("SELECT COUNT(*) AS n FROM empresas").fetchone())
+        n_trab = _row_count(conn.execute("SELECT COUNT(*) AS n FROM trabajadores WHERE activo=1").fetchone())
+        n_liq = _row_count(conn.execute("SELECT COUNT(*) AS n FROM liquidaciones").fetchone())
+        n_fin = _row_count(conn.execute("SELECT COUNT(*) AS n FROM finiquitos").fetchone())
         col1.metric("Empresas", n_emp)
         col2.metric("Trabajadores Activos", n_trab)
         col3.metric("Liquidaciones", n_liq)
         col4.metric("Finiquitos", n_fin)
 
         st.subheader("Empresas registradas")
-        df = pd.read_sql("SELECT id, rut, razon_social, comuna FROM empresas", conn)
+        df = read_sql_df("SELECT id, rut, razon_social, comuna FROM empresas", conn)
         st.dataframe(df, use_container_width=True)
 
         st.info("💡 Comienza cargando los **Indicadores Previred** del mes, luego crea/selecciona empresa y trabajadores.")
@@ -2601,7 +2871,7 @@ def main():
                         st.error(f"Error: {e}")
 
         st.subheader("Listado de Empresas")
-        df = pd.read_sql("SELECT * FROM empresas", conn)
+        df = read_sql_df("SELECT * FROM empresas", conn)
         st.dataframe(df, use_container_width=True)
 
     # -------------------- TRABAJADORES --------------------
@@ -2648,7 +2918,7 @@ def main():
                         st.error(f"Error: {e}")
 
         st.subheader("Trabajadores")
-        df = pd.read_sql("""
+        df = read_sql_df("""
             SELECT t.id, e.razon_social as empresa, t.rut, t.nombres, t.apellido_paterno, t.apellido_materno,
                    t.afp, t.salud, t.numero_cargas, t.tramo_asignacion_familiar, t.activo
             FROM trabajadores t JOIN empresas e ON t.empresa_id = e.id
@@ -2710,7 +2980,7 @@ def main():
                         st.download_button("⬇️ Descargar Contrato DOCX", f, file_name=ruta_dl.name, key="dl_contrato_docx")
 
         st.subheader("Contratos existentes")
-        df = pd.read_sql("""
+        df = read_sql_df("""
             SELECT c.id, e.razon_social, t.rut, t.nombres || ' ' || t.apellido_paterno as trabajador,
                    c.cargo, c.tipo_contrato, c.fecha_inicio, c.fecha_termino, c.sueldo_base, c.activo
             FROM contratos c
@@ -2785,7 +3055,7 @@ def main():
                 st.success(f"Indicadores {per_edit} guardados — UF={uf_e:,.2f} | UTM={utm_e:,.0f}")
 
         st.subheader("Indicadores cargados")
-        df = pd.read_sql(
+        df = read_sql_df(
             "SELECT periodo, uf, utm, tope_afp, tope_afc, tope_inp, sis_tasa, renta_minima FROM indicadores ORDER BY periodo DESC",
             conn,
         )
@@ -3233,7 +3503,7 @@ def main():
                     st.download_button("⬇️ Descargar Finiquito DOCX", f, file_name=ruta_dl.name, key="dl_finiquito_docx")
 
         st.subheader("Finiquitos registrados")
-        df = pd.read_sql("""
+        df = read_sql_df("""
             SELECT f.id, t.rut, t.nombres || ' ' || t.apellido_paterno as trabajador, f.fecha_termino, f.causal, f.total_finiquito
             FROM finiquitos f JOIN trabajadores t ON f.trabajador_id = t.id
             WHERE f.empresa_id = ?
@@ -3292,7 +3562,7 @@ def main():
         """)
 
         st.subheader("Liquidaciones disponibles (referencia)")
-        df = pd.read_sql("""
+        df = read_sql_df("""
             SELECT periodo, COUNT(*) as trabajadores, SUM(total_haberes) as total_haberes, SUM(liquido) as total_liquido
             FROM liquidaciones WHERE empresa_id = ?
             GROUP BY periodo ORDER BY periodo DESC
