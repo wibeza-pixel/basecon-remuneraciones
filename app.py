@@ -2925,6 +2925,61 @@ def main():
         """, conn)
         st.dataframe(df, use_container_width=True)
 
+        # ----- Editar trabajador existente (RUT, AFP, salud, etc.) -----
+        trabs_all = conn.execute("""
+            SELECT t.id, t.rut, t.nombres, t.apellido_paterno, t.apellido_materno,
+                   t.afp, t.salud, t.isapre, t.pactado_salud_uf, t.numero_cargas,
+                   t.tramo_asignacion_familiar, t.activo, t.empresa_id
+            FROM trabajadores t ORDER BY t.apellido_paterno, t.nombres
+        """).fetchall()
+        if trabs_all:
+            with st.expander("✏️ Editar trabajador existente", expanded=True):
+                opts_t = {
+                    f"{dict(t).get('rut') or '(sin RUT)'} — {dict(t).get('nombres') or ''} {dict(t).get('apellido_paterno') or ''} (id {dict(t).get('id')})": dict(t)
+                    for t in trabs_all
+                }
+                sel_lab = st.selectbox("Seleccionar trabajador", list(opts_t.keys()), key="edit_trab_sel")
+                t0 = opts_t[sel_lab]
+                with st.form("editar_trabajador"):
+                    c1, c2, c3 = st.columns(3)
+                    rut_e = c1.text_input("RUT *", value=t0.get("rut") or "")
+                    nombres_e = c2.text_input("Nombres *", value=t0.get("nombres") or "")
+                    ap_pat_e = c3.text_input("Apellido Paterno *", value=t0.get("apellido_paterno") or "")
+                    ap_mat_e = c1.text_input("Apellido Materno", value=t0.get("apellido_materno") or "")
+                    afps = ["Provida", "Habitat", "Capital", "Cuprum", "PlanVital", "Modelo", "Uno"]
+                    afp_e = c2.selectbox("AFP", afps, index=afps.index(t0["afp"]) if t0.get("afp") in afps else 0)
+                    saluds = ["FONASA", "ISAPRE"]
+                    salud_e = c3.selectbox("Salud", saluds, index=saluds.index(t0["salud"]) if t0.get("salud") in saluds else 0)
+                    isapre_e = c1.text_input("Isapre", value=t0.get("isapre") or "")
+                    pactado_e = c2.number_input("Pactado Salud (UF)", value=float(t0.get("pactado_salud_uf") or 0), step=0.001)
+                    num_cargas_e = c3.number_input("Nº Cargas", min_value=0, value=int(t0.get("numero_cargas") or 0), step=1)
+                    tramos = ["A", "B", "C", "D"]
+                    tramo_e = c1.selectbox("Tramo Asig. Familiar", tramos,
+                                           index=tramos.index(t0["tramo_asignacion_familiar"]) if t0.get("tramo_asignacion_familiar") in tramos else 3)
+                    activo_e = c2.checkbox("Activo", value=bool(t0.get("activo", 1)))
+                    if st.form_submit_button("Guardar cambios"):
+                        if not (rut_e or "").strip():
+                            st.error("El RUT es obligatorio.")
+                        else:
+                            try:
+                                conn.execute("""
+                                    UPDATE trabajadores SET
+                                        rut=?, nombres=?, apellido_paterno=?, apellido_materno=?,
+                                        afp=?, salud=?, isapre=?, pactado_salud_uf=?,
+                                        numero_cargas=?, tramo_asignacion_familiar=?, activo=?
+                                    WHERE id=?
+                                """, (
+                                    rut_e.strip(), nombres_e, ap_pat_e, ap_mat_e,
+                                    afp_e, salud_e, isapre_e, pactado_e,
+                                    num_cargas_e, tramo_e, 1 if activo_e else 0,
+                                    t0["id"],
+                                ))
+                                conn.commit()
+                                st.success("Trabajador actualizado. Si ya había liquidaciones, vuelve a calcularlas.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al actualizar: {e}")
+
     # -------------------- CONTRATOS --------------------
     elif menu == "📄 Contratos":
         st.header("Contratos de Trabajo")
@@ -3582,15 +3637,33 @@ def main():
         periodo = st.text_input("Periodo remuneraciones (YYYY-MM)", value="2026-07")
 
         if st.button("Generar Archivo TXT Previred"):
-            ruta = EXPORTS_DIR / f"previred_{emp_opts[emp_sel]}_{periodo}.txt"
-            res = generar_previred_txt(emp_opts[emp_sel], periodo, str(ruta))
+            eid = emp_opts[emp_sel]
+            n_liq = _row_count(conn.execute(
+                "SELECT COUNT(*) AS n FROM liquidaciones WHERE empresa_id=? AND periodo=?",
+                (eid, periodo),
+            ).fetchone())
+            n_sin_rut = _row_count(conn.execute("""
+                SELECT COUNT(*) AS n FROM liquidaciones l
+                JOIN trabajadores t ON l.trabajador_id = t.id
+                WHERE l.empresa_id=? AND l.periodo=?
+                  AND (t.rut IS NULL OR TRIM(t.rut) = '')
+            """, (eid, periodo)).fetchone())
+            ruta = EXPORTS_DIR / f"previred_{eid}_{periodo}.txt"
+            res = generar_previred_txt(eid, periodo, str(ruta))
             if res:
                 st.success(f"Archivo generado: {ruta.name}")
                 with open(ruta, "rb") as f:
                     st.download_button("⬇️ Descargar TXT Previred", f, file_name=ruta.name)
                 st.code(open(ruta).read()[:1000], language="text")
-            else:
+            elif n_liq > 0 and n_sin_rut > 0:
+                st.error(
+                    f"Hay {n_liq} liquidación(es), pero {n_sin_rut} trabajador(es) **sin RUT válido**. "
+                    "Ve a Trabajadores → Editar trabajador, completa el RUT, guarda y vuelve a generar."
+                )
+            elif n_liq == 0:
                 st.warning("No hay liquidaciones para ese periodo/empresa. Calcula liquidaciones primero.")
+            else:
+                st.warning("No se pudo generar el archivo. Revisa RUT de los trabajadores y vuelve a intentar.")
 
     # -------------------- DECLARACIÓN JURADA 1887 --------------------
     elif menu == "📋 Declaración Jurada 1887":
