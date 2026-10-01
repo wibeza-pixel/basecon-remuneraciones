@@ -36,12 +36,13 @@ st.set_page_config(page_title="BASECON — Remuneraciones Chile",
 
 
 @st.cache_resource
-def _inicializar():
+def _inicializar(destino: str):
+    # La clave incluye el destino: si se cambia DATABASE_URL en los secrets, se crean las tablas en la base nueva
     db.init_db()
     return True
 
 
-_inicializar()
+_inicializar((db.database_url() if db.is_postgres() else str(C.DB_PATH)) + "|" + db.schema_pg())
 EXPORTS_DIR = C.EXPORTS_DIR
 LOGO = C.BASE_DIR / "basecon-logo.png"
 
