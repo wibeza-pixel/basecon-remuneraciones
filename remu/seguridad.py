@@ -58,6 +58,19 @@ def _firma(u: dict) -> str:
     return hmac.new(s.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
+def _migrar_firmas(conn):
+    """Si BASECON_SECRET se agregó después de crear usuarios, firma una sola vez a los existentes
+    (antes quedaban bloqueados todos, incluido el administrador)."""
+    if db.scalar(conn, "SELECT valor FROM configuracion WHERE clave='firmas_con_secreto'") == "1":
+        return
+    for x in db.rows(conn, "SELECT id FROM usuarios"):
+        f = db.scalar(conn, "SELECT valor FROM configuracion WHERE clave=?", (f"firma_usuario_{x['id']}",))
+        if not f:  # solo los creados sin secreto; una firma existente nunca se reescribe aquí
+            _guardar_firma(conn, x["id"])
+    db.upsert(conn, "configuracion", {"clave": "firmas_con_secreto", "valor": "1"}, ["clave"])
+    conn.commit()
+
+
 def hay_usuarios() -> bool:
     conn = db.get_conn()
     try:
@@ -147,6 +160,7 @@ def autenticar(usuario: str, clave: str) -> tuple[dict | None, str]:
         if not hmac.compare_digest(h, u["hash"]):
             return None, "Usuario o clave incorrectos."
         if _secret():
+            _migrar_firmas(conn)
             f = db.scalar(conn, "SELECT valor FROM configuracion WHERE clave=?", (f"firma_usuario_{u['id']}",))
             if not f or not hmac.compare_digest(f, _firma(u)):
                 return None, "Los datos de acceso de este usuario fueron modificados fuera de la aplicación."
