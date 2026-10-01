@@ -125,7 +125,7 @@ def test_horas_extras_42h():
 
 
 def test_numero_a_palabras():
-    assert numero_a_palabras(1_234_567) == "UN MILLON DOSCIENTOS TREINTA Y CUATRO MIL QUINIENTOS SESENTA Y SIETE"
+    assert numero_a_palabras(1_234_567) == "UN MILLÓN DOSCIENTOS TREINTA Y CUATRO MIL QUINIENTOS SESENTA Y SIETE"
     assert numero_a_palabras(100) == "CIEN"
     assert numero_a_palabras(21) == "VEINTIUN"
     assert numero_a_palabras(2_000_000) == "DOS MILLONES"
