@@ -13,6 +13,21 @@ jobs:
         env:
           DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          if [ -z "$DB_URL" ]; then echo "Falta el secret SUPABASE_DB_URL"; exit 1; fi
           pip install --quiet psycopg2-binary
-          python -c "import os, psycopg2; c = psycopg2.connect(os.environ['DB_URL']); cur = c.cursor(); cur.execute('select 1'); print('Supabase activo:', cur.fetchone()[0]); c.close()"
+          python - <<'PY'
+          import os, re, sys, psycopg2
+          raw = os.environ.get("DB_URL", "")
+          url = raw.strip()
+          url = re.sub(r'^\s*DATABASE_URL\s*=\s*', '', url)   # por si se pegó con el nombre
+          url = url.strip().strip('"').strip("'").strip()      # por si se pegó con comillas
+          if not url:
+              sys.exit("Falta el secret SUPABASE_DB_URL")
+          if not url.startswith(("postgresql://", "postgres://")):
+              sys.exit(f"El secret no empieza con postgresql:// (empieza con {url[:12]!r}). Revíselo.")
+          if raw != url:
+              print("Aviso: el secret tenía espacios, comillas o el nombre DATABASE_URL; se limpiaron.")
+          c = psycopg2.connect(url)
+          cur = c.cursor(); cur.execute("select 1")
+          print("Supabase activo:", cur.fetchone()[0])
+          c.close()
+          PY
