@@ -26,6 +26,7 @@ sqlite3.register_adapter(datetime, lambda d: d.isoformat(sep=" "))
 _pool = None
 _pool_lock = threading.Lock()
 _init_done = False
+_init_destinos: set = set()
 
 
 # ------------------------------------------------------------------
@@ -349,7 +350,8 @@ def ddl_completo() -> str:
 def init_db(force: bool = False):
     """Crea tablas, aplica migraciones y carga datos base SIN sobrescribir lo existente."""
     global _init_done
-    if _init_done and not force:
+    destino = (database_url() if is_postgres() else str(C.DB_PATH)) + "|" + schema_pg()
+    if destino in _init_destinos and not force:
         return
     t = _tipos()
     conn = get_conn()
@@ -372,6 +374,7 @@ def init_db(force: bool = False):
         _seed(conn)
         conn.commit()
         _init_done = True
+        _init_destinos.add(destino)
     finally:
         conn.close()
 
