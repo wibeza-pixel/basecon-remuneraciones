@@ -738,3 +738,61 @@ def generar_finiquito_docx(empresa, trabajador, fin, contrato, ruta):
     _parrafo(doc, "RATIFICACIÓN ANTE MINISTRO DE FE: _______________________________   Fecha: ____________", size=9)
     doc.save(ruta)
     return ruta
+
+
+def generar_anexo_docx(empresa, trabajador, contrato, anexo, ruta):
+    """
+    anexo: {"fecha", "vigencia", "cambios": {...}} con cambios posibles:
+      sueldo_base, cargo, jornada_semanal (+horario), colacion, movilizacion, lugar_trabajo,
+      duracion ("indefinido" o una fecha de prórroga), texto_libre.
+    """
+    cb = anexo.get("cambios") or {}
+    doc = Document()
+    _formato_documento(doc)
+    _parrafo(doc, "ANEXO DE CONTRATO DE TRABAJO", bold=True, size=14, align="center", space_after=12)
+
+    p = _parrafo(doc, align="justify")
+    p.add_run(f"En {empresa.get('comuna') or 'Santiago'}, a {C.fecha_larga(anexo.get('fecha'))}, entre ")
+    p.add_run(f"{empresa.get('razon_social')}, RUT {empresa.get('rut')}").bold = True
+    p.add_run(f", representada por don/ña {empresa.get('representante_legal') or '__________'}, RUN "
+              f"{empresa.get('rut_representante') or '__________'}, con domicilio en {empresa.get('direccion') or ''}, "
+              f"comuna de {empresa.get('comuna') or ''}, en adelante «el empleador», y don/ña ")
+    p.add_run(f"{_nombre(trabajador)}, RUN {trabajador.get('rut')}").bold = True
+    p.add_run(f", en adelante «el trabajador», se conviene el siguiente anexo al contrato de trabajo de fecha "
+              f"{C.fecha_larga(contrato.get('fecha_inicio'))}:")
+
+    _clausula(doc, "PRIMERO.-", "Las partes acuerdan modificar el contrato de trabajo individualizado, a contar del "
+              f"{C.fecha_larga(anexo.get('vigencia') or anexo.get('fecha'))}, en los siguientes términos:")
+    lineas = []
+    if cb.get("sueldo_base") is not None:
+        lineas.append(f"Remuneración: el sueldo base mensual será de $ {C.fmt_clp(cb['sueldo_base'])} "
+                      f"({numero_a_palabras(cb['sueldo_base']).lower()} pesos).")
+    if cb.get("cargo"):
+        lineas.append(f"Cargo: el trabajador desempeñará el cargo de {cb['cargo']}.")
+    if cb.get("lugar_trabajo"):
+        lineas.append(f"Lugar de trabajo: {cb['lugar_trabajo']}.")
+    if cb.get("jornada_semanal"):
+        lineas.append(f"Jornada: la jornada ordinaria será de {int(cb['jornada_semanal'])} horas semanales, distribuidas "
+                      f"{cb.get('horario') or contrato.get('horario') or 'de lunes a viernes'}.")
+    if cb.get("colacion") is not None:
+        lineas.append(f"Asignación de colación: $ {C.fmt_clp(cb['colacion'])} mensuales (no imponible, art. 41).")
+    if cb.get("movilizacion") is not None:
+        lineas.append(f"Asignación de movilización: $ {C.fmt_clp(cb['movilizacion'])} mensuales (no imponible, art. 41).")
+    if cb.get("duracion") == "indefinido":
+        lineas.append("Duración: a contar de esta fecha el contrato de trabajo pasa a ser de duración indefinida.")
+    elif cb.get("duracion"):
+        lineas.append(f"Duración: el contrato a plazo fijo se prorroga hasta el {C.fecha_larga(cb['duracion'])}.")
+    if (cb.get("texto_libre") or "").strip():
+        lineas.append(cb["texto_libre"].strip())
+    letras = "abcdefghij"
+    for i, ln in enumerate(lineas):
+        _parrafo(doc, f"{letras[i]}) {ln}", sangria_cm=1.0, space_after=6)
+
+    _clausula(doc, "SEGUNDO.-", "En todo lo no modificado por el presente anexo, se mantienen plenamente vigentes las "
+              "estipulaciones del contrato de trabajo y de sus anexos anteriores.")
+    _clausula(doc, "TERCERO.-", "El presente anexo se firma en dos ejemplares del mismo tenor, quedando uno en poder "
+              "de cada parte, y forma parte integrante del contrato de trabajo.")
+    _parrafo(doc, "", space_after=36)
+    _firmas(doc, empresa, trabajador)
+    doc.save(ruta)
+    return ruta

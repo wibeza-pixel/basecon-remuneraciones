@@ -297,6 +297,16 @@ TABLAS = {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
     "configuracion": """
         clave TEXT PRIMARY KEY, valor TEXT""",
+    "documentos_trabajador": """
+        id {PK}, empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+        trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id), tipo TEXT NOT NULL, periodo TEXT, fecha DATE,
+        descripcion TEXT, nombre_archivo TEXT NOT NULL, mime TEXT, tamano INTEGER, contenido {BLOB} NOT NULL,
+        origen TEXT DEFAULT 'generado', ref_tabla TEXT, ref_id INTEGER, creado_por TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
+    "anexos_contrato": """
+        id {PK}, contrato_id INTEGER NOT NULL REFERENCES contratos(id), empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+        trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id), fecha DATE, vigencia DATE, cambios TEXT,
+        documento_id INTEGER, creado_por TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
 }
 
 # Columnas agregadas en v2 (para bases existentes de la v1)
@@ -337,8 +347,8 @@ MIGRACIONES = [
 
 def _tipos():
     if is_postgres():
-        return {"PK": "BIGSERIAL PRIMARY KEY", "REAL": "DOUBLE PRECISION"}
-    return {"PK": "INTEGER PRIMARY KEY AUTOINCREMENT", "REAL": "REAL"}
+        return {"PK": "BIGSERIAL PRIMARY KEY", "REAL": "DOUBLE PRECISION", "BLOB": "BYTEA"}
+    return {"PK": "INTEGER PRIMARY KEY AUTOINCREMENT", "REAL": "REAL", "BLOB": "BLOB"}
 
 
 def ddl_completo() -> str:
