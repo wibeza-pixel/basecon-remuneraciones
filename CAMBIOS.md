@@ -1,3 +1,17 @@
+# BASECON v2.5 — Historial del trabajador y anexos de contrato
+
+- **📁 Historial y documentos del trabajador** (pantalla Trabajadores): una carpeta por trabajador, también para los inactivos y finiquitados.
+  - Se guardan **automáticamente** al generarlos: contratos, anexos, liquidaciones (una por mes; si se regenera, reemplaza a la anterior), comprobantes de vacaciones y finiquitos.
+  - **Subir archivos:** licencias médicas en PDF, contratos o anexos firmados escaneados, certificados, cartas de aviso, etc. Se aceptan PDF, JPG, PNG, DOCX y XLSX, de hasta 5 MB.
+  - Para cada documento hay filtro por tipo y botón de descarga.
+  - Para eliminar: el administrador puede borrar cualquier documento; cada usuario puede borrar solo lo que él subió.
+  - Los archivos se guardan dentro de la base de datos (Supabase), porque el disco de Streamlit Cloud se borra en cada reinicio. El administrador ve el espacio usado.
+- **📝 Anexo de contrato** (pantalla Contratos):
+  - Cambios posibles: sueldo base, cargo, jornada y horario, colación, movilización, lugar de trabajo, duración (pasa a indefinido o prórroga del plazo fijo) y cláusula libre.
+  - Genera el documento Word, lo guarda en el historial y, si se marca, actualiza el contrato para las liquidaciones siguientes.
+  - Validaciones: ingreso mínimo y jornada máxima. Avisa si el sueldo baja y si una segunda renovación de plazo fijo debe pasar a indefinido (art. 159 N°4).
+- "Un millón" se escribía sin tilde en los montos en palabras; corregido.
+
 # BASECON v2.4 — Mes activo y calculadora de sueldo
 
 - **Mes activo destacado** arriba a la derecha (recuadro azul *MES ACTIVO · SEPTIEMBRE 2026*). Se cambia en el menú lateral (📅 Mes activo) o escribiendo otro periodo en cualquier pantalla. Movimientos, Liquidaciones, Libro, Previred e Indicadores se abren con ese mes. Al entrar, parte en el último mes con indicadores cargados.
