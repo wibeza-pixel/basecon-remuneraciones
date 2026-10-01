@@ -479,10 +479,16 @@ def _form_trabajador(prefix, t=None):
     d["codigo"] = c1.text_input("Código interno", value=t.get("codigo") or "", key=f"{prefix}_cod")
     d["cargo"] = c2.text_input("Cargo", value=t.get("cargo") or "", key=f"{prefix}_cargo")
     d["centro_costo"] = c3.text_input("Centro de costo", value=t.get("centro_costo") or "", key=f"{prefix}_ccos")
-    d["pensionado"] = int(c1.checkbox("Pensionado", value=bool(t.get("pensionado")), key=f"{prefix}_pen",
-                                      help="Sin SIS, sin cotización empleador Ley 21.735 y sin seguro de cesantía."))
-    d["cotiza_afp"] = int(c2.checkbox("Cotiza en AFP", value=bool(t.get("cotiza_afp", 1)), key=f"{prefix}_cafp",
-                                      help="Desmarcar solo para pensionados que optaron por no cotizar."))
+    d["pensionado"] = int(c1.checkbox("Pensionado / jubilado", value=bool(t.get("pensionado")), key=f"{prefix}_pen",
+                                      help="Paga solo salud 7%: sin AFP (salvo cotización voluntaria), sin seguro de "
+                                           "cesantía, sin SIS y sin cotización del empleador Ley 21.735."))
+    d["afp_voluntaria_pensionado"] = int(c2.checkbox(
+        "AFP voluntaria (pensionado)", value=bool(t.get("afp_voluntaria_pensionado")), key=f"{prefix}_avol",
+        help="Solo para pensionados que decidieron seguir cotizando en su AFP. Si no se marca, no se descuenta AFP."))
+    d["cotiza_afp"] = int(c3.checkbox("Cotiza en AFP", value=bool(t.get("cotiza_afp", 1)),
+                                      key=f"{prefix}_cafp",
+                                      help="Para trabajadores no pensionados. Desmarcar solo en casos de exención expresa, "
+                                           "por ejemplo técnicos extranjeros (Ley 18.156)."))
     return d
 
 
@@ -514,7 +520,7 @@ def pantalla_trabajadores(conn):
             st.success(f"{n} trabajador(es) importado(s).")
             mostrar_advertencias(errs, "Filas no importadas")
     trabs = db.rows(conn, "SELECT * FROM trabajadores WHERE empresa_id=? ORDER BY apellido_paterno, nombres", (emp["id"],))
-    incompletos = [t for t in trabs if t.get("activo") and not t.get("afp") and t.get("cotiza_afp", 1)]
+    incompletos = [t for t in trabs if t.get("activo") and not t.get("afp") and C.cotiza_afp_efectivo(t)]
     if incompletos and "remuneraciones" in modulos():
         st.warning(f"{len(incompletos)} trabajador(es) sin AFP registrada: complete sus datos previsionales antes de liquidar.")
     if trabs:
@@ -795,6 +801,11 @@ def pantalla_indicadores(conn):
                            ". Se conservará el valor anterior; complételos en la edición manual.")
             per_pdf = input_periodo("Periodo a guardar", key="ind_pdf_per", sincronizar=False)
             if st.button("Guardar indicadores del PDF"):
+                errs = C.validar_indicadores({**(db.get_indicadores(per_pdf, conn) or {}),
+                                              **{k: v for k, v in res.items() if v}})
+                if errs:
+                    st.error("No se guardó. " + " ".join(errs) + " Corrija el dato en Edición manual.")
+                    st.stop()
                 db.guardar_indicadores(conn, per_pdf, res)
                 conn.commit()
                 st.success(f"Indicadores {per_pdf} guardados.")
@@ -832,11 +843,20 @@ def pantalla_indicadores(conn):
                 "renta_max": cols[i].number_input(f"Tramo {t}: renta hasta", value=int(aft[t]["renta_max"]), step=1,
                                                   key=f"af_r_{t}")}
         if st.form_submit_button("Guardar indicadores"):
+            errs = C.validar_indicadores(v)
+            if errs:
+                st.error("No se guardó. " + " ".join(errs))
+                st.stop()
             db.guardar_indicadores(conn, per, v)
             conn.commit()
             st.success(f"Indicadores {per} guardados.")
 
     st.subheader("Indicadores cargados")
+    for x in db.rows(conn, "SELECT periodo FROM indicadores ORDER BY periodo DESC"):
+        e = C.validar_indicadores(db.get_indicadores(x["periodo"], conn) or {})
+        if e:
+            st.error(f"**{x['periodo']}:** " + " ".join(e) + " Corríjalo en Edición manual (arriba) y vuelva a calcular "
+                     "las liquidaciones de ese mes.")
     st.dataframe(db.read_sql_df("SELECT periodo, uf, utm, tope_afp, tope_afc, sis_tasa, renta_minima, tasa_ccaf_salud "
                                 "FROM indicadores ORDER BY periodo DESC", conn), width="stretch")
     st.subheader("Ley 21.735 — cotización de cargo del empleador")
@@ -872,6 +892,11 @@ def pantalla_liquidaciones(conn):
         return
     if not ind.get("utm"):
         st.error("Los indicadores del periodo no tienen UTM: no se puede calcular el impuesto único.")
+        return
+    errs = C.validar_indicadores(ind)
+    if errs:
+        st.error(f"Los indicadores de {periodo} tienen un error y el cálculo saldría mal: " + " ".join(errs)
+                 + " Corríjalos en **Indicadores → Edición manual** y vuelva a calcular las liquidaciones del mes.")
         return
     ref = K.tasas_reforma_ley_21735(periodo)
     def _cl(v, dec=0):
@@ -1287,6 +1312,11 @@ def pantalla_calculadora(conn):
             return
         per, ind = ult, db.get_indicadores(ult, conn)
         st.warning(f"No hay indicadores de {nombre_mes(periodo_activo())}; se usan los de {nombre_mes(per)}.")
+    errs = C.validar_indicadores(ind)
+    if errs:
+        st.error(f"Los indicadores de {nombre_mes(per)} tienen un error: " + " ".join(errs)
+                 + " Corríjalos en **Indicadores** para usar la calculadora.")
+        return
     uf_txt = f"{float(ind.get('uf') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     st.info(f"Indicadores de **{nombre_mes(per)}** · UF \\${uf_txt} · UTM \\${C.fmt_clp(ind.get('utm'))} · "
             f"Ingreso mínimo \\${C.fmt_clp(ind.get('renta_minima'))}")

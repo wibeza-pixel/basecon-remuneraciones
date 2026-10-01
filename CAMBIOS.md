@@ -1,3 +1,16 @@
+# BASECON v2.6 — Pensionados y control de la UTM
+
+- **Pensionados / jubilados:** pagan solo salud 7%. Sin AFP (salvo que se marque *AFP voluntaria (pensionado)*), sin seguro de cesantía, sin SIS y sin cotización del empleador Ley 21.735. Antes se descontaba AFP a los pensionados si no se desmarcaba "Cotiza en AFP".
+  - "Cotiza en AFP" queda solo para no pensionados con exención expresa (por ejemplo, técnicos extranjeros).
+  - La liquidación ya no muestra la línea AFP en cero.
+  - Se aplica igual en la liquidación, el archivo Previred, el LRE y la calculadora.
+- **UTM mal leída del PDF de Previred:** se guardaba la UF en el campo UTM y el impuesto único salía cobrado a sueldos exentos.
+  - El lector ahora toma la UTM solo si es coherente con la UF (cerca de 1,75 UF).
+  - Toma la UF del último día del mes, que es la que Previred usa para los topes.
+- **Control de indicadores:** no se pueden guardar indicadores incoherentes (UTM vs. UF, tope de unas 90 UF, ingreso mínimo).
+  - Indicadores marca en rojo los meses con error.
+  - Liquidaciones y la calculadora no calculan con indicadores erróneos y explican qué corregir.
+
 # BASECON v2.5 — Historial del trabajador y anexos de contrato
 
 - **📁 Historial y documentos del trabajador** (pantalla Trabajadores): una carpeta por trabajador, también para los inactivos y finiquitados.
