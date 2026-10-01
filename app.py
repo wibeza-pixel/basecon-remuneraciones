@@ -15,6 +15,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from remu import anexos as AN
+from remu import archivo as A
 from remu import calculadora as CALC
 from remu import calculos as K
 from remu import config as C
@@ -534,6 +536,85 @@ def pantalla_trabajadores(conn):
         df = pd.DataFrame(trabs)[["id", "codigo", "rut", "nombres", "apellido_paterno", "apellido_materno", "cargo", "afp", "salud",
                                   "numero_cargas", "tramo_asignacion_familiar", "pensionado", "activo"]]
         st.dataframe(df, width="stretch")
+        seccion_historial(conn, emp, trabs)
+
+
+def seccion_historial(conn, emp, trabs):
+    """Carpeta del trabajador: documentos generados por la app y archivos subidos (licencias, firmados, etc.)."""
+    st.subheader("📁 Historial y documentos del trabajador")
+    opts = {f"{t['rut']} — {t['nombres']} {t['apellido_paterno']}{'' if t.get('activo', 1) else ' (inactivo)'}": t
+            for t in trabs}
+    t = opts[st.selectbox("Trabajador", list(opts), key="hist_trab")]
+    usuario = usuario_actual().get("usuario", "")
+
+    docs = A.listar(conn, t["id"])
+    c1, c2, c3, c4 = st.columns(4)
+    cuenta = {k: sum(1 for d in docs if d["tipo"] == k) for k in ("Contrato", "Liquidación", "Licencia médica")}
+    c1.metric("Documentos", len(docs))
+    c2.metric("Contratos y anexos", cuenta["Contrato"] + sum(1 for d in docs if d["tipo"] == "Anexo de contrato"))
+    c3.metric("Liquidaciones", cuenta["Liquidación"])
+    c4.metric("Licencias", cuenta["Licencia médica"])
+
+    if docs:
+        tipos = sorted({d["tipo"] for d in docs})
+        filtro = st.multiselect("Filtrar por tipo", tipos, key=f"hist_filtro_{t['id']}")
+        vis = [d for d in docs if not filtro or d["tipo"] in filtro]
+        tabla = pd.DataFrame([{
+            "Fecha": C.fecha_ddmmaaaa(d["fecha"]), "Tipo": d["tipo"], "Periodo": d.get("periodo") or "",
+            "Descripción": d.get("descripcion") or "", "Archivo": d["nombre_archivo"],
+            "Tamaño": A.tamano_legible(d["tamano"]),
+            "Origen": "Subido" if d["origen"] == "subido" else "Generado", "Por": d.get("creado_por") or ""} for d in vis])
+        st.dataframe(tabla, hide_index=True, width="stretch")
+        etiquetas = {f"{C.fecha_ddmmaaaa(d['fecha'])} · {d['tipo']}{' ' + d['periodo'] if d.get('periodo') else ''} · "
+                     f"{d['nombre_archivo']}": d for d in vis}
+        if etiquetas:
+            a, b = st.columns([4, 1])
+            d = etiquetas[a.selectbox("Documento", list(etiquetas), key=f"hist_doc_{t['id']}")]
+            full = A.obtener(conn, d["id"])
+            b.markdown("&nbsp;")
+            b.download_button("⬇️ Descargar", full["contenido"], file_name=d["nombre_archivo"], mime=d["mime"],
+                              key=f"hist_dl_{d['id']}", width="stretch")
+            puede_borrar = es_admin() or (d["origen"] == "subido" and d.get("creado_por") == usuario)
+            if puede_borrar:
+                with st.popover("🗑️ Eliminar este documento"):
+                    st.write(f"Se eliminará **{d['nombre_archivo']}** del historial. No se puede deshacer.")
+                    if st.button("Sí, eliminar", key=f"hist_del_{d['id']}", type="primary"):
+                        A.eliminar(conn, d["id"])
+                        conn.commit()
+                        st.success("Documento eliminado.")
+                        st.rerun()
+    else:
+        st.info("Este trabajador aún no tiene documentos. Los contratos, anexos, liquidaciones, comprobantes de "
+                "vacaciones y finiquitos se guardan aquí automáticamente al generarlos.")
+
+    with st.expander("📎 Subir un documento (licencia médica, contrato firmado, certificado…)"):
+        with st.form(f"hist_subir_{t['id']}", clear_on_submit=True):
+            a, b = st.columns(2)
+            tipo = a.selectbox("Tipo de documento", A.TIPOS_SUBIDA)
+            fecha = b.date_input("Fecha del documento", value=date.today(), format="DD/MM/YYYY")
+            per = a.text_input("Periodo (AAAA-MM, opcional)", value="")
+            desc = b.text_input("Descripción", placeholder="Ej.: licencia 5 días, del 10 al 14 de septiembre")
+            arch = st.file_uploader(f"Archivo ({', '.join(A.EXTENSIONES_SUBIDA).upper()}; máximo {A.MAX_SUBIDA_MB} MB)",
+                                    type=A.EXTENSIONES_SUBIDA)
+            if st.form_submit_button("Guardar en el historial", type="primary"):
+                per = per.strip()
+                if not arch:
+                    st.error("Seleccione el archivo.")
+                elif per and not periodo_valido(per):
+                    st.error("Periodo inválido. Use AAAA-MM o déjelo vacío.")
+                else:
+                    try:
+                        A.guardar(conn, emp["id"], t["id"], tipo, arch.name, arch.getvalue(), periodo=per or None,
+                                  fecha=fecha, descripcion=desc, origen="subido", usuario=usuario)
+                        conn.commit()
+                        st.success(f"{arch.name} guardado en el historial.")
+                        st.rerun()
+                    except ValueError as ex:
+                        st.error(str(ex))
+    if es_admin():
+        u = A.uso(conn)
+        st.caption(f"Espacio usado por documentos (todas las empresas): {A.tamano_legible(u['bytes'])} en {u['n']} archivo(s). "
+                   "El plan gratuito de Supabase permite 500 MB para toda la base.")
 
 
 def pantalla_contratos(conn):
@@ -589,10 +670,15 @@ def pantalla_contratos(conn):
                         cont = db.row(conn, "SELECT * FROM contratos WHERE id=?", (cid,))
                         ruta = EXPORTS_DIR / f"contrato_{C.rut_partes(trab['rut'])[0]}_{date.today():%Y%m%d}.docx"
                         D.generar_contrato_docx(emp, trab, cont, str(ruta))
+                        A.guardar_archivo(conn, emp["id"], trab["id"], "Contrato", ruta, fecha=f_ini,
+                                          descripcion=f"{cargo} · {tipo}", ref_tabla="contratos", ref_id=cid,
+                                          usuario=usuario_actual().get("usuario", ""))
+                        conn.commit()
                         st.session_state["ultimo_contrato_docx"] = str(ruta)
                         st.success(f"Contrato creado: {ruta.name}")
         if st.session_state.get("ultimo_contrato_docx"):
             descargar(Path(st.session_state["ultimo_contrato_docx"]), "⬇️ Descargar contrato DOCX", "dl_contrato")
+    seccion_anexo(conn, emp)
     df = db.read_sql_df("""
         SELECT c.id, t.rut, t.nombres || ' ' || t.apellido_paterno AS trabajador, c.cargo, c.tipo_contrato,
                c.fecha_inicio, c.fecha_termino, c.sueldo_base, c.tipo_gratificacion, c.jornada_semanal, c.activo
@@ -602,6 +688,96 @@ def pantalla_contratos(conn):
         if len(viejos):
             st.warning(f"{len(viejos)} contrato(s) activo(s) con jornada sobre {jmax} h: deben ajustarse a la Ley 21.561.")
     st.dataframe(df, width="stretch")
+
+
+def seccion_anexo(conn, emp):
+    """Anexo de contrato: genera el documento, lo guarda en el historial y actualiza el contrato."""
+    conts = db.rows(conn, """SELECT c.*, t.rut, t.nombres, t.apellido_paterno FROM contratos c
+                             JOIN trabajadores t ON c.trabajador_id=t.id WHERE c.empresa_id=? AND c.activo=1
+                             ORDER BY t.apellido_paterno""", (emp["id"],))
+    with st.expander("📝 Anexo de contrato"):
+        if not conts:
+            st.info("No hay contratos activos.")
+            return
+        copts = {f"{c['rut']} — {c['nombres']} {c['apellido_paterno']} ({c['cargo']}, {c['tipo_contrato']})": c for c in conts}
+        cont = copts[st.selectbox("Contrato", list(copts), key="anx_cont")]
+        k = f"anx_{cont['id']}"
+        st.caption(f"Actual: sueldo base \\${C.fmt_clp(cont['sueldo_base'])} · {cont['jornada_semanal']} h · "
+                   f"colación \\${C.fmt_clp(cont.get('colacion'))} · movilización \\${C.fmt_clp(cont.get('movilizacion'))}"
+                   + (f" · término {C.fecha_ddmmaaaa(cont['fecha_termino'])}" if cont.get("fecha_termino") else ""))
+        a, b = st.columns(2)
+        f_anexo = a.date_input("Fecha del anexo", value=date.today(), format="DD/MM/YYYY", key=f"{k}_f")
+        vig = b.date_input("Vigente a contar del", value=date.today(), format="DD/MM/YYYY", key=f"{k}_v")
+        st.markdown("**Marque lo que cambia:**")
+        cambios = {}
+        a, b = st.columns([1, 2])
+        if a.checkbox("Sueldo base", key=f"{k}_csb"):
+            cambios["sueldo_base"] = b.number_input("Nuevo sueldo base", min_value=0, value=int(cont["sueldo_base"] or 0),
+                                                    step=10000, key=f"{k}_sb")
+        a, b = st.columns([1, 2])
+        if a.checkbox("Cargo", key=f"{k}_ccar"):
+            cambios["cargo"] = b.text_input("Nuevo cargo", value=cont.get("cargo") or "", key=f"{k}_car").strip()
+        a, b = st.columns([1, 2])
+        jmax = C.jornada_maxima(date.today())
+        if a.checkbox("Jornada / horario", key=f"{k}_cjor"):
+            cambios["jornada_semanal"] = b.number_input(f"Nueva jornada semanal (máx. {jmax} h)", min_value=1, max_value=45,
+                                                        value=min(int(cont.get("jornada_semanal") or jmax), jmax), key=f"{k}_jor")
+            cambios["horario"] = b.text_input("Distribución / horario", value=cont.get("horario") or "", key=f"{k}_hor").strip()
+        a, b = st.columns([1, 2])
+        if a.checkbox("Colación", key=f"{k}_ccol"):
+            cambios["colacion"] = b.number_input("Nueva colación", min_value=0, value=int(cont.get("colacion") or 0),
+                                                 step=1000, key=f"{k}_col")
+        a, b = st.columns([1, 2])
+        if a.checkbox("Movilización", key=f"{k}_cmov"):
+            cambios["movilizacion"] = b.number_input("Nueva movilización", min_value=0,
+                                                     value=int(cont.get("movilizacion") or 0), step=1000, key=f"{k}_mov")
+        a, b = st.columns([1, 2])
+        if a.checkbox("Lugar de trabajo", key=f"{k}_clug"):
+            cambios["lugar_trabajo"] = b.text_input("Nuevo lugar de trabajo", value=cont.get("lugar_trabajo") or "",
+                                                    key=f"{k}_lug").strip()
+        if cont.get("tipo_contrato") == "Plazo Fijo":
+            a, b = st.columns([1, 2])
+            if a.checkbox("Duración", key=f"{k}_cdur"):
+                op = b.radio("Duración", ["Pasa a indefinido", "Prorrogar plazo fijo"], horizontal=True,
+                             label_visibility="collapsed", key=f"{k}_dur")
+                if op.startswith("Pasa"):
+                    cambios["duracion"] = "indefinido"
+                else:
+                    cambios["duracion"] = b.date_input("Nueva fecha de término", value=None, format="DD/MM/YYYY",
+                                                       key=f"{k}_ft")
+        texto = st.text_area("Cláusula adicional (opcional)", key=f"{k}_txt",
+                             placeholder="Ej.: Se pacta un bono de asistencia mensual de $30.000…")
+        if texto.strip():
+            cambios["texto_libre"] = texto.strip()
+        aplicar = st.checkbox("Actualizar el contrato con estos cambios (las liquidaciones siguientes los usarán)",
+                              value=True, key=f"{k}_apl")
+        ind = db.get_indicadores(periodo_activo(), conn) or db.get_indicadores(periodo_default(), conn) or {}
+        errores, avisos = AN.validar(cont, {kk: v for kk, v in cambios.items() if kk != "horario"},
+                                     float(ind.get("renta_minima") or 0), AN.renovaciones(conn, cont["id"]))
+        if cambios.get("duracion") is None and "duracion" in cambios:
+            errores.append("Indique la nueva fecha de término.")
+        mostrar_advertencias(avisos, "Atención")
+        if st.button("Generar anexo", type="primary", key=f"{k}_btn"):
+            if errores:
+                st.error("\n".join(f"- {e}" for e in errores))
+            else:
+                trab = db.row(conn, "SELECT * FROM trabajadores WHERE id=?", (cont["trabajador_id"],))
+                r = AN.crear_anexo(conn, emp, trab, cont, f_anexo, vig, cambios, EXPORTS_DIR,
+                                   usuario=usuario_actual().get("usuario", ""), aplicar=aplicar)
+                st.session_state["ult_anexo"] = r["ruta"]
+                st.success(f"Anexo generado ({r['resumen']}) y guardado en el historial del trabajador."
+                           + (" Contrato actualizado." if aplicar else ""))
+        if st.session_state.get("ult_anexo"):
+            descargar(Path(st.session_state["ult_anexo"]), "⬇️ Descargar anexo DOCX", "dl_anexo")
+        anx = db.rows(conn, """SELECT a.fecha, a.vigencia, t.rut, t.nombres || ' ' || t.apellido_paterno AS trabajador,
+                                      a.cambios FROM anexos_contrato a JOIN trabajadores t ON a.trabajador_id=t.id
+                               WHERE a.empresa_id=? ORDER BY a.fecha DESC, a.id DESC""", (emp["id"],))
+        if anx:
+            st.markdown("**Anexos registrados**")
+            st.dataframe(pd.DataFrame([{"Fecha": C.fecha_ddmmaaaa(x["fecha"]), "Vigencia": C.fecha_ddmmaaaa(x["vigencia"]),
+                                        "RUT": x["rut"], "Trabajador": x["trabajador"],
+                                        "Cambios": ", ".join(AN._resumen(json.loads(x["cambios"] or "{}")))} for x in anx]),
+                         hide_index=True, width="stretch")
 
 
 def pantalla_indicadores(conn):
@@ -748,6 +924,11 @@ def pantalla_liquidaciones(conn):
         fname = f"liquidacion_{C.rut_partes(l['rut'])[0]}_{periodo}.docx"
         ruta = EXPORTS_DIR / fname
         D.generar_liquidacion_docx(emp, trab, ld, periodo, str(ruta), indicadores=ind)
+        A.guardar_archivo(conn, emp["id"], l["trabajador_id"], "Liquidación", ruta, periodo=periodo,
+                          fecha=C.fin_de_mes(periodo), descripcion=f"Líquido ${C.fmt_clp(l['liquido'])}",
+                          ref_tabla="liquidaciones", ref_id=l["id"], usuario=usuario_actual().get("usuario", ""),
+                          reemplazar=True)
+        conn.commit()
         return ruta, fname
 
     opts = {f"{l['rut']} — {l['nombres']} {l['apellido_paterno']} (líquido ${C.fmt_clp(l['liquido'])})": l for l in liqs}
@@ -817,7 +998,7 @@ def pantalla_vacaciones(conn):
             saldo = st.number_input("Saldo pendiente (días)", 0.0, 200.0, 0.0, 0.5)
             if st.form_submit_button("Registrar y generar comprobante"):
                 corridos, f_fin = FQ.habiles_a_corridos(f_ini - timedelta(days=1), dias_hab, feriados)
-                db.insert(conn, "vacaciones", dict(trabajador_id=topts[tsel], empresa_id=emp["id"], fecha_inicio=f_ini,
+                vid = db.insert(conn, "vacaciones", dict(trabajador_id=topts[tsel], empresa_id=emp["id"], fecha_inicio=f_ini,
                                                    fecha_termino=f_fin, dias_habiles=dias_hab, dias_corridos=corridos,
                                                    tipo=tipo))
                 conn.commit()
@@ -828,6 +1009,10 @@ def pantalla_vacaciones(conn):
                 D.generar_comprobante_feriado_docx(emp, trab, dict(fecha_inicio=f_ini, fecha_termino=f_fin,
                                                                    dias_habiles=dias_hab, dias_corridos=corridos,
                                                                    tipo=tipo, saldo_pendiente=saldo), cont, str(ruta))
+                A.guardar_archivo(conn, emp["id"], topts[tsel], "Comprobante de vacaciones", ruta, fecha=f_ini,
+                                  descripcion=f"{dias_hab:g} días hábiles {tipo.lower()} · hasta {C.fecha_ddmmaaaa(f_fin)}",
+                                  ref_tabla="vacaciones", ref_id=vid, usuario=usuario_actual().get("usuario", ""))
+                conn.commit()
                 st.session_state["ult_fer"] = str(ruta)
                 st.success(f"Registrado: último día de vacaciones {C.fecha_ddmmaaaa(f_fin)} ({corridos:g} días corridos).")
     if st.session_state.get("ult_fer"):
@@ -918,6 +1103,10 @@ def pantalla_finiquitos(conn):
                 trab = db.row(conn, "SELECT * FROM trabajadores WHERE id=?", (cont["trabajador_id"],))
                 ruta = EXPORTS_DIR / f"finiquito_{C.rut_partes(trab['rut'])[0]}_{r['fecha_termino']}.docx"
                 D.generar_finiquito_docx(emp, trab, r, cont, str(ruta))
+                A.guardar_archivo(conn, emp["id"], trab["id"], "Finiquito", ruta, fecha=r["fecha_termino"],
+                                  descripcion=f"{r['causal']} · total ${C.fmt_clp(r['total_finiquito'])}",
+                                  ref_tabla="finiquitos", ref_id=fid, usuario=usuario_actual().get("usuario", ""))
+                conn.commit()
                 st.session_state["ult_fin"] = str(ruta)
                 st.session_state.pop("fin_prev", None)
                 st.success(f"Finiquito N° {fid} registrado.")
