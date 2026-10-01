@@ -839,6 +839,8 @@ def pantalla_usuarios(conn):
                        "ultimo_acceso FROM usuarios ORDER BY usuario")
     for u in us:
         u["dias_restantes"] = S.dias_restantes(u)
+        v = S.fecha_vencimiento(u)
+        u["vence"] = C.fecha_ddmmaaaa(v) if v else "sin plazo"
     st.dataframe(pd.DataFrame(us), width="stretch")
     if us:
         with st.expander("✏️ Modificar usuario"):
@@ -856,8 +858,13 @@ def pantalla_usuarios(conn):
                     mact = ["remuneraciones"]
                 mods = st.multiselect("Módulos", list(C.MODULOS), default=mact, format_func=lambda m: C.MODULOS[m])
                 nueva = st.text_input("Nueva clave (dejar vacío para mantener)", type="password")
+                venc = S.fecha_vencimiento(x)
+                st.caption(f"Vencimiento actual: {C.fecha_ddmmaaaa(venc) if venc else 'sin plazo'}")
+                prorroga = st.number_input("Prorrogar (días adicionales)", 0, 3650, 0,
+                                           help="Suma días al vencimiento actual (o desde hoy si ya venció).")
                 reiniciar = st.checkbox("Reiniciar plazo (cuenta desde el próximo acceso)")
                 fexp = st.date_input("Nueva fecha de expiración (opcional)", value=None)
+                sin_plazo = st.checkbox("Quitar plazo (acceso permanente)")
                 if st.form_submit_button("Guardar"):
                     campos = dict(activo=int(activo), empresas="*" if todas else sel, modulos=mods)
                     if nueva:
@@ -866,6 +873,11 @@ def pantalla_usuarios(conn):
                         campos["primer_acceso"] = None
                     if fexp:
                         campos["fecha_expira"] = fexp
+                    if prorroga:
+                        base = max(date.today(), venc or date.today())
+                        campos["fecha_expira"] = base + timedelta(days=int(prorroga))
+                    if sin_plazo:
+                        campos.update(fecha_expira=None, dias_acceso=None)
                     try:
                         if x["id"] == usuario_actual().get("id") and not activo:
                             raise ValueError("No puede desactivar su propio usuario.")
