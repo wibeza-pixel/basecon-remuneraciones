@@ -1,3 +1,11 @@
+# BASECON v2.3 — Contacto de ayuda, legibilidad y seguridad
+
+- **Datos de contacto para ayuda.** El administrador los define en *Usuarios → Datos de contacto para ayuda* (nombre, teléfono, WhatsApp, correo, horario). Se muestran en la pantalla de ingreso, en el menú lateral y en *Ayuda*; WhatsApp y correo quedan como enlaces.
+- **Letra más grande y colores más fuertes** en toda la app: títulos, etiquetas de cada campo, desplegables, pestañas, botones y menú lateral.
+- **Liquidaciones:** la línea de indicadores (UF, UTM, tope, Ley 21.735) se veía con formato extraño; corregido.
+- **BASECON_SECRET agregado después:** antes bloqueaba a todos los usuarios ya creados, incluido el administrador. Ahora, en el primer ingreso con el secreto, los usuarios sin firma se firman una sola vez. Una firma existente nunca se reescribe, así que una edición manual de la base se sigue detectando.
+- Documentación: *Manual de operación* (usuarios), *Guía del administrador* y presentación comercial.
+
 # BASECON v2.1 — Módulo Movimientos RRHH (reemplaza a Control RRHH)
 
 - **Una sola app con permisos por módulo.** En *Usuarios*, cada usuario tiene sus empresas y sus módulos: **Movimientos RRHH** o **Remuneraciones**, o ambos. El administrador ve todo.
