@@ -66,236 +66,277 @@ def _set_table_borders(table, color="000000", sz="4"):
 
 
 
+def _cell_borders(cell, **lados):
+    """Bordes por celda: lados = top/bottom/left/right con valores 'single' o None (sin borde)."""
+    tcPr = cell._tc.get_or_add_tcPr()
+    for child in list(tcPr):
+        if child.tag == qn("w:tcBorders"):
+            tcPr.remove(child)
+    b = OxmlElement("w:tcBorders")
+    for lado in ("top", "left", "bottom", "right"):
+        el = OxmlElement(f"w:{lado}")
+        val = lados.get(lado)
+        el.set(qn("w:val"), "single" if val else "nil")
+        if val:
+            el.set(qn("w:sz"), str(val if isinstance(val, int) else 6))
+            el.set(qn("w:space"), "0")
+            el.set(qn("w:color"), "000000")
+        b.append(el)
+    tcPr.append(b)
+
+
+def _sin_bordes(table):
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+    for child in list(tblPr):
+        if child.tag == qn("w:tblBorders"):
+            tblPr.remove(child)
+    b = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "nil")
+        b.append(el)
+    tblPr.append(b)
+
+
+def _anchos(table, anchos_cm):
+    table.autofit = False
+    for i, w in enumerate(anchos_cm):
+        table.columns[i].width = Cm(w)
+        for r in table.rows:
+            r.cells[i].width = Cm(w)
+
+
+def _txt(cell, texto, bold=False, size=9, align="left", espaciado=0, font="Calibri"):
+    cell.text = ""
+    p = cell.paragraphs[0]
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(0)
+    p.alignment = {"left": WD_ALIGN_PARAGRAPH.LEFT, "right": WD_ALIGN_PARAGRAPH.RIGHT,
+                   "center": WD_ALIGN_PARAGRAPH.CENTER}[align]
+    r = p.add_run("" if texto is None else str(texto))
+    r.bold = bold
+    r.font.name = font
+    r.font.size = Pt(size)
+    if espaciado:
+        rPr = r._r.get_or_add_rPr()
+        sp = OxmlElement("w:spacing")
+        sp.set(qn("w:val"), str(espaciado))
+        rPr.append(sp)
+    return r
+
+
 def generar_liquidacion_docx(empresa, trabajador, liq, periodo, ruta, indicadores=None):
     """
-    Liquidación formato profesional chileno (referencia PDF Joacime / AGOSTO 2026).
-    Layout tipo formulario: encabezado centrado, ficha 2 columnas, haberes|descuentos, líquido.
+    Liquidación de remuneraciones en el formato de la oficina (modelo NUT EXPORT, agosto 2026):
+    encabezado de la empresa a la izquierda, título espaciado y subrayado, ficha del trabajador en recuadro,
+    columnas HABERES | DESCUENTOS con subtotales, totales, líquido, monto en palabras y firma.
     """
+    FONT = "Calibri"
     doc = Document()
     for sec in doc.sections:
-        sec.top_margin = Cm(1.0)
-        sec.bottom_margin = Cm(1.0)
-        sec.left_margin = Cm(1.8)
-        sec.right_margin = Cm(1.8)
-
-    style = doc.styles["Normal"]
-    style.font.name = "Arial"
-    style.font.size = Pt(9)
+        sec.page_width, sec.page_height = Cm(21.59), Cm(27.94)
+        sec.top_margin = Cm(1.3)
+        sec.bottom_margin = Cm(1.2)
+        sec.left_margin = Cm(1.5)
+        sec.right_margin = Cm(1.5)
+    st = doc.styles["Normal"]
+    st.font.name = FONT
+    st.font.size = Pt(9)
+    st.element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
 
     ind = indicadores or {}
     uf = float(ind.get("uf") or 0)
     tope_afp = float(ind.get("tope_afp") or 0)
     tope_afc = float(ind.get("tope_afc") or 0)
 
-    def _p(text, bold=False, size=9, center=False, space_after=0):
+    def par(texto, bold=False, size=9, align="left", subrayado=False, espaciado=0, after=2):
         p = doc.add_paragraph()
-        if center:
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.paragraph_format.space_after = Pt(space_after)
+        p.alignment = {"left": WD_ALIGN_PARAGRAPH.LEFT, "center": WD_ALIGN_PARAGRAPH.CENTER,
+                       "right": WD_ALIGN_PARAGRAPH.RIGHT}[align]
         p.paragraph_format.space_before = Pt(0)
-        run = p.add_run(str(text))
-        run.font.name = "Arial"
-        run.font.size = Pt(size)
-        run.bold = bold
+        p.paragraph_format.space_after = Pt(after)
+        r = p.add_run(texto)
+        r.bold, r.underline = bold, subrayado
+        r.font.name, r.font.size = FONT, Pt(size)
+        if espaciado:
+            sp = OxmlElement("w:spacing")
+            sp.set(qn("w:val"), str(espaciado))
+            r._r.get_or_add_rPr().append(sp)
         return p
 
-    # ----- Encabezado -----
-    _p(str(empresa.get("razon_social") or "").upper(), bold=True, size=11, center=True)
-    _p(str(empresa.get("rut") or ""), size=9, center=True)
-    giro = empresa.get("giro") or empresa.get("actividad") or ""
-    if giro:
-        _p(str(giro).upper(), size=8, center=True)
+    # ----- Encabezado de la empresa -----
+    par(str(empresa.get("razon_social") or "").upper(), bold=True, size=11, after=3)
+    par(str(empresa.get("rut") or ""), bold=True, size=8)
     dir_line = f"{empresa.get('direccion') or ''}, {empresa.get('comuna') or ''} - {empresa.get('ciudad') or ''}".strip(" ,-")
-    _p(dir_line.upper(), size=8, center=True)
+    if dir_line:
+        par(dir_line.upper(), bold=True, size=8)
+    if empresa.get("giro"):
+        par(str(empresa["giro"]).upper(), bold=True, size=8)
     if empresa.get("telefono"):
-        _p(str(empresa["telefono"]), size=8, center=True)
+        par(str(empresa["telefono"]), bold=True, size=8)
+    par("", after=8)
+    par("LIQUIDACION  DE  REMUNERACION", bold=True, size=11, align="center", subrayado=True, espaciado=60, after=6)
+    par(C.mes_anio_es(periodo), bold=True, size=11, align="center", subrayado=True, after=4)
+    par(str(trabajador.get("centro_costo") or liq.get("area") or "CASA MATRIZ").upper(), size=8, align="right", after=0)
 
-    _p("L I Q U I D A C I O N    D E   R E M U N E R A C I O N", bold=True, size=12, center=True)
-
-    mes_anio = C.mes_anio_es(periodo)
-    _p(mes_anio, bold=True, size=11, center=True)
-
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p.paragraph_format.space_after = Pt(4)
-    r = p.add_run(str(liq.get("area") or "ADMINISTRACION").upper())
-    r.font.name = "Arial"
-    r.font.size = Pt(9)
-
-    # ----- Ficha trabajador -----
-    nombre = f"{trabajador.get('nombres') or ''} {trabajador.get('apellido_paterno') or ''} {trabajador.get('apellido_materno') or ''}".strip()
-    salud = (trabajador.get("salud") or "FONASA").upper()
-    pactado = trabajador.get("pactado_salud_uf") or 0
-    pactado_txt = "7,00  %" if not pactado else f"{float(pactado):.2f}".replace(".", ",") + " UF"
-    fecha_ing = str(liq.get("fecha_inicio") or "")[:10]
-    if len(fecha_ing) == 10 and fecha_ing[4] == "-":
-        fecha_ing = f"{fecha_ing[8:10]}-{fecha_ing[5:7]}-{fecha_ing[0:4]}"
+    # ----- Ficha del trabajador (recuadro) -----
+    nombre = f"{trabajador.get('apellido_paterno') or ''} {trabajador.get('apellido_materno') or ''} {trabajador.get('nombres') or ''}"
+    nombre = " ".join(nombre.split()).upper()
+    pactado = float(trabajador.get("pactado_salud_uf") or 0)
+    es_isapre = (trabajador.get("salud") or "").upper() == "ISAPRE"
+    pactado_txt = (f"{pactado:.4f}".rstrip("0").rstrip(".").replace(".", ",") + " UF") if (es_isapre and pactado) else "7,00  %"
     uf_txt = f"{uf:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-    info = doc.add_table(rows=5, cols=4)
-    _set_table_borders(info, sz="4")
-    filas_info = [
-        ("Código", str(trabajador.get("id") or liq.get("trabajador_id") or ""), "Pactado Salud", pactado_txt),
-        ("Nombre", nombre.upper(), "Base Tributable", _fmt_clp(liq.get("base_tributable"))),
+    filas = [
+        ("Código", str(trabajador.get("codigo") or trabajador.get("id") or ""), "Pactado Salud", pactado_txt),
+        ("Nombre", nombre, "Base Tributable", _fmt_clp(liq.get("base_tributable"))),
         ("R.U.T.", trabajador.get("rut") or "", "U.F. del Mes", uf_txt),
-        ("Fecha Ingreso", fecha_ing, "Tope Imponible", _fmt_clp(tope_afp)),
-        ("Cargo", str(liq.get("cargo") or "").upper(), "Tope Imponible AFC", _fmt_clp(tope_afc)),
+        ("Fecha Ingreso", C.fecha_ddmmaaaa(liq.get("fecha_inicio")), "Tope Imponible", _fmt_clp(tope_afp)),
+        ("Cargo", str(liq.get("cargo") or trabajador.get("cargo") or "").upper(), "Tope Imponible AFC", _fmt_clp(tope_afc)),
     ]
-    for i, (a, b, c, d) in enumerate(filas_info):
-        _cell(info.cell(i, 0), f"{a}  :", bold=False, size=8)
-        _cell(info.cell(i, 1), b, size=9)
-        _cell(info.cell(i, 2), f"{c}  :", bold=False, size=8)
-        _cell(info.cell(i, 3), d, size=9, align="right")
-    for col, w in enumerate([2.8, 5.5, 3.2, 2.8]):
-        for row in info.rows:
-            row.cells[col].width = Cm(w)
-
-    doc.add_paragraph().paragraph_format.space_after = Pt(6)
+    info = doc.add_table(rows=len(filas), cols=6)
+    _sin_bordes(info)
+    for i, (a, b, c, d) in enumerate(filas):
+        fila = info.rows[i].cells
+        _txt(fila[0], a, size=9)
+        _txt(fila[1], ":", size=9)
+        _txt(fila[2], b, size=9)
+        _txt(fila[3], c, size=9)
+        _txt(fila[4], ":", size=9)
+        _txt(fila[5], d, size=9, align="right")
+        for j, cell in enumerate(fila):
+            _cell_borders(cell, top=8 if i == 0 else None, left=6 if j == 0 else None,
+                          right=6 if j == 5 else None)
+    _anchos(info, [2.4, 0.5, 7.4, 3.4, 0.5, 4.4])
 
     # ----- Haberes / Descuentos -----
-    afp_nombre = (trabajador.get("afp") or "").upper()
-    tasa_afp = ""
-    try:
-        tasas = ind.get("afp_tasas") or {}
-        if isinstance(tasas, str):
-            import json as _json
-            tasas = _json.loads(tasas)
-        key = afp_nombre.title() if afp_nombre.title() in (tasas or {}) else afp_nombre
-        if key in (tasas or {}):
-            tasa_afp = f"{float(tasas[key]):.2f}".replace(".", ",")
-    except Exception:
-        tasa_afp = ""
-
-    total_imposicion = (
-        float(liq.get("afp_monto") or 0)
-        + float(liq.get("salud_monto") or 0)
-        + float(liq.get("adicional_isapre") or 0)
-        + float(liq.get("afc_trabajador") or 0)
-    )
     detalle = liq.get("detalle") or []
     if isinstance(detalle, str):
         detalle = json.loads(detalle or "[]")
-    anticipo = float(liq.get("anticipo") or 0)
-    desc_det = [d for d in detalle if d.get("tipo") == "Descuento"]
-    otros_desc = anticipo + sum(float(d["monto"]) for d in desc_det)
-    total_desc = float(liq.get("total_descuentos") or (total_imposicion + otros_desc + float(liq.get("impuesto_unico") or 0)))
-
-    haberes_rows = [
-        ("SUELDO BASE", _fmt_clp(liq.get("sueldo_base") or liq.get("sueldo_calculado"))),
-        (f"SUELDO ({int(liq.get('dias_trabajados') or 30)} DIAS)", _fmt_clp(liq.get("sueldo_calculado"))),
-    ]
-    if float(liq.get("gratificacion") or 0) > 0:
-        haberes_rows.append(("GRATIFICACION LEGAL", _fmt_clp(liq.get("gratificacion"))))
+    dias = liq.get("dias_trabajados")
+    dias_txt = f"{float(dias):g}" if dias is not None else "30"
+    hab = [("SUELDO BASE", liq.get("sueldo_base") or liq.get("sueldo_calculado")),
+           (f"SUELDO CALCULADO ({dias_txt})", liq.get("sueldo_calculado"))]
     imp_det = [d for d in detalle if d.get("tipo") == "Haber imponible"]
     if imp_det:
-        for d in imp_det:
-            haberes_rows.append((str(d["nombre"]).upper()[:34], _fmt_clp(d["monto"])))
-    elif float(liq.get("monto_horas_extras") or 0) > 0:
-        haberes_rows.append(("HORAS EXTRAS", _fmt_clp(liq.get("monto_horas_extras"))))
-    if float(liq.get("otros_haberes") or 0) > 0:
-        haberes_rows.append(("OTROS HABERES IMPONIBLES", _fmt_clp(liq.get("otros_haberes"))))
-    haberes_rows.append(("TOTAL IMPONIBLE", _fmt_clp(liq.get("total_imponible"))))
-    if float(liq.get("movilizacion") or 0) > 0:
-        haberes_rows.append(("MOVILIZACION", _fmt_clp(liq.get("movilizacion"))))
-    if float(liq.get("colacion") or 0) > 0:
-        haberes_rows.append(("COLACION", _fmt_clp(liq.get("colacion"))))
-    if float(liq.get("asignacion_familiar") or 0) > 0:
-        haberes_rows.append(("ASIGNACION FAMILIAR", _fmt_clp(liq.get("asignacion_familiar"))))
-    for d in detalle:
-        if d.get("tipo") == "Haber no imponible":
-            haberes_rows.append((str(d["nombre"]).upper()[:34], _fmt_clp(d["monto"])))
+        hab += [(str(d["nombre"]).upper(), d["monto"]) for d in imp_det]
+    elif float(liq.get("monto_horas_extras") or 0):
+        hab.append(("HORAS EXTRAS", liq.get("monto_horas_extras")))
+    if float(liq.get("gratificacion") or 0):
+        hab.append(("GRATIFICACION LEGAL", liq.get("gratificacion")))
+    if float(liq.get("otros_haberes") or 0):
+        hab.append(("OTROS HABERES IMPONIBLES", liq.get("otros_haberes")))
+    hab += [("", None), ("TOTAL IMPONIBLE", liq.get("total_imponible")), ("", None)]
+    noimp = []
+    for etiqueta, k in (("COLACION", "colacion"), ("MOVILIZACION", "movilizacion"),
+                        ("ASIGNACION FAMILIAR", "asignacion_familiar")):
+        if float(liq.get(k) or 0):
+            noimp.append((etiqueta, liq.get(k)))
+    noimp += [(str(d["nombre"]).upper(), d["monto"]) for d in detalle if d.get("tipo") == "Haber no imponible"]
+    total_noimp = sum(float(m or 0) for _, m in noimp)
+    if noimp:
+        hab += noimp + [("", None), ("TOTAL NO IMPONIBLE", total_noimp)]
 
-    desc_rows = []
-    if tasa_afp:
-        desc_rows.append((f"{tasa_afp}  % {afp_nombre}", _fmt_clp(liq.get("afp_monto"))))
-    else:
-        desc_rows.append((afp_nombre or "AFP", _fmt_clp(liq.get("afp_monto"))))
-    desc_rows.append((f"7,00  % {salud}", _fmt_clp(liq.get("salud_monto"))))
-    if float(liq.get("adicional_isapre") or 0) > 0:
-        desc_rows.append(("ADICIONAL ISAPRE", _fmt_clp(liq.get("adicional_isapre"))))
-    if float(liq.get("afc_trabajador") or 0) > 0:
-        desc_rows.append(("SEGURO CESANTIA", _fmt_clp(liq.get("afc_trabajador"))))
-    desc_rows.append(("TOTAL IMPOSICION", _fmt_clp(total_imposicion)))
+    afp_nombre = {"PlanVital": "PLAN VITAL"}.get(trabajador.get("afp"), (trabajador.get("afp") or "").upper())
+    tasas = ind.get("afp_tasas") or {}
+    if isinstance(tasas, str):
+        tasas = json.loads(tasas or "{}")
+    tasa = tasas.get(trabajador.get("afp"))
+    salud = "FONASA" if not es_isapre else (trabajador.get("isapre") or "ISAPRE").upper()
+    desc = []
+    if float(liq.get("afp_monto") or 0) or trabajador.get("afp"):
+        etiqueta = (f"{float(tasa):.2f}".replace(".", ",") + f"  % {afp_nombre}") if tasa else afp_nombre or "AFP"
+        desc.append((etiqueta, liq.get("afp_monto")))
+    desc.append((f" 7,00  % {salud}", liq.get("salud_monto")))
+    if float(liq.get("adicional_isapre") or 0):
+        desc.append(("ADICIONAL ISAPRE", liq.get("adicional_isapre")))
+    if float(liq.get("afc_trabajador") or 0):
+        desc.append(("SEGURO CESANTIA", liq.get("afc_trabajador")))
+    total_impos = sum(float(liq.get(k) or 0) for k in ("afp_monto", "salud_monto", "adicional_isapre", "afc_trabajador"))
+    desc += [("", None), ("TOTAL IMPOSICION", total_impos)]
     iu = float(liq.get("impuesto_unico") or 0)
-    desc_rows.append(("IMPUESTO UNICO", _fmt_clp(iu)))
-    if anticipo > 0:
-        desc_rows.append(("ANTICIPO", _fmt_clp(anticipo)))
-    for d in desc_det:
-        desc_rows.append((str(d["nombre"]).upper()[:34], _fmt_clp(d["monto"])))
-    if otros_desc > 0:
-        desc_rows.append(("TOTAL OTROS DESCUENTOS", _fmt_clp(otros_desc)))
+    if iu:
+        desc += [("", None), ("IMPUESTO UNICO", iu)]
+    otros = []
+    if float(liq.get("anticipo") or 0):
+        otros.append(("ANTICIPO 1", liq.get("anticipo")))
+    otros += [(str(d["nombre"]).upper(), d["monto"]) for d in detalle if d.get("tipo") == "Descuento"]
+    if otros:
+        desc += [("", None)] + otros + [("", None), ("TOTAL OTROS DESCUENTOS", sum(float(m or 0) for _, m in otros))]
+    total_desc = float(liq.get("total_descuentos") or (total_impos + iu + sum(float(m or 0) for _, m in otros)))
 
-    n = max(len(haberes_rows), len(desc_rows))
-    # +1 encabezado +1 totales +1 liquido
-    tab = doc.add_table(rows=n + 3, cols=4)
-    _set_table_borders(tab, sz="4")
+    n = max(len(hab), len(desc)) + 1  # +1 fila en blanco al final del cuerpo
+    hab += [("", None)] * (n - len(hab))
+    desc += [("", None)] * (n - len(desc))
+    filas_total = 1 + n + 1 + 1 + 1  # encabezado, cuerpo, totales, líquido, son
+    tab = doc.add_table(rows=filas_total, cols=4)
+    _sin_bordes(tab)
+    LINEA = 6
 
-    # Encabezados fusionados visualmente
-    _cell(tab.cell(0, 0), "H A B E R E S", bold=True, size=9, align="center")
-    _cell(tab.cell(0, 1), "", size=9)
-    _cell(tab.cell(0, 2), "D E S C U E N T O S", bold=True, size=9, align="center")
-    _cell(tab.cell(0, 3), "", size=9)
-    try:
-        tab.cell(0, 0).merge(tab.cell(0, 1))
-        tab.cell(0, 2).merge(tab.cell(0, 3))
-    except Exception:
-        pass
+    def bordes_fila(i, top=None, bottom=None):
+        for j, cell in enumerate(tab.rows[i].cells):
+            _cell_borders(cell, top=top, bottom=bottom, left=LINEA if j == 0 else None,
+                          right=LINEA if j in (1, 3) else None)
 
-    for i in range(n):
-        row = i + 1
-        if i < len(haberes_rows):
-            _cell(tab.cell(row, 0), haberes_rows[i][0], size=9)
-            _cell(tab.cell(row, 1), haberes_rows[i][1], size=9, align="right")
-        else:
-            _cell(tab.cell(row, 0), "", size=9)
-            _cell(tab.cell(row, 1), "", size=9)
-        if i < len(desc_rows):
-            _cell(tab.cell(row, 2), desc_rows[i][0], size=9)
-            _cell(tab.cell(row, 3), desc_rows[i][1], size=9, align="right")
-        else:
-            _cell(tab.cell(row, 2), "", size=9)
-            _cell(tab.cell(row, 3), "", size=9)
-
-    # Totales
-    tr = n + 1
-    _cell(tab.cell(tr, 0), "TOTAL HABERES  $", bold=True, size=9)
-    _cell(tab.cell(tr, 1), _fmt_clp(liq.get("total_haberes")), bold=True, size=9, align="right")
-    _cell(tab.cell(tr, 2), "TOTAL DESCUENTOS  $", bold=True, size=9)
-    _cell(tab.cell(tr, 3), _fmt_clp(total_desc), bold=True, size=9, align="right")
-
-    # Líquido (fila completa)
-    lr = n + 2
-    try:
-        tab.cell(lr, 0).merge(tab.cell(lr, 3))
-    except Exception:
-        pass
-    _cell(tab.cell(lr, 0), f"L I Q U I D O      $     {_fmt_clp(liq.get('liquido'))}", bold=True, size=12, align="center")
-
-    for col, w in enumerate([5.0, 2.5, 5.0, 2.5]):
-        for row in tab.rows:
-            row.cells[col].width = Cm(w)
-
+    # encabezado
+    _txt(tab.cell(0, 0), "HABERES", size=9, align="center", espaciado=60)
+    _txt(tab.cell(0, 2), "DESCUENTOS", size=9, align="center", espaciado=60)
+    tab.cell(0, 0).merge(tab.cell(0, 1))
+    tab.cell(0, 2).merge(tab.cell(0, 3))
+    bordes_fila(0, top=LINEA, bottom=LINEA)
+    # cuerpo
+    for k in range(n):
+        i = 1 + k
+        (h1, h2), (d1, d2) = hab[k], desc[k]
+        _txt(tab.cell(i, 0), h1, size=9)
+        _txt(tab.cell(i, 1), _fmt_clp(h2) if h2 is not None else "", size=9, align="right")
+        _txt(tab.cell(i, 2), d1, size=9)
+        _txt(tab.cell(i, 3), _fmt_clp(d2) if d2 is not None else "", size=9, align="right")
+        bordes_fila(i)
+    # totales
+    it = 1 + n
+    _txt(tab.cell(it, 0), "TOTAL HABERES      $", size=9, espaciado=50)
+    _txt(tab.cell(it, 1), _fmt_clp(liq.get("total_haberes")), size=9, align="right")
+    _txt(tab.cell(it, 2), "TOTAL DESCUENTOS     $", size=9, espaciado=50)
+    _txt(tab.cell(it, 3), _fmt_clp(total_desc), size=9, align="right")
+    bordes_fila(it, top=LINEA, bottom=LINEA)
+    # líquido
+    il = it + 1
+    _txt(tab.cell(il, 0), "", size=9)
+    _txt(tab.cell(il, 2), "LIQUIDO                    $", bold=True, size=11, espaciado=60)
+    _txt(tab.cell(il, 3), _fmt_clp(liq.get("liquido")), bold=True, size=11, align="right")
+    for j, cell in enumerate(tab.rows[il].cells):
+        _cell_borders(cell, top=LINEA, left=LINEA if j == 0 else None, right=LINEA if j == 3 else None)
+    # son
+    isn = il + 1
     palabras = numero_a_palabras(int(round(float(liq.get("liquido") or 0))))
-    _p(f"SON: {palabras} PESOS", size=9)
+    tab.cell(isn, 0).merge(tab.cell(isn, 3))
+    _txt(tab.cell(isn, 0), f"     SON:    {palabras} PESOS", size=9)
+    _cell_borders(tab.cell(isn, 0), left=LINEA, right=LINEA, bottom=LINEA)
+    for r in (il, isn):
+        tab.rows[r].height = Cm(1.0)
+    for r in (0, it):
+        tab.rows[r].height = Cm(0.6)
+    _anchos(tab, [7.2, 2.2, 7.0, 2.2])
 
-    doc.add_paragraph()
-    cert = doc.add_paragraph()
-    cert.paragraph_format.space_after = Pt(6)
-    run = cert.add_run(
-        f"CERTIFICO QUE HE RECIBIDO DE  {str(empresa.get('razon_social') or '').upper()} "
-        f"A MI ENTERA SATISFACCION, LA CANTIDAD INDICADA ANTERIORMENTE, COMO SALDO LIQUIDO DE MI SUELDO Y  NO TENGO CARGO NI "
-        f"COBRO ALGUNO POSTERIOR QUE HACER, POR NINGUNO DE LOS MOTIVOS COMPRENDIDOS EN ESTA LIQUIDACION."
-    )
-    run.font.name = "Arial"
-    run.font.size = Pt(8)
-
-    doc.add_paragraph()
-    doc.add_paragraph()
-    firm = doc.add_paragraph()
-    firm.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    fr = firm.add_run("_____________________________\nFIRMA DEL TRABAJADOR\nRECIBI COPIA")
-    fr.font.name = "Arial"
-    fr.font.size = Pt(9)
+    # ----- Certificación y firma -----
+    par("", after=6)
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(0)
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r = p.add_run(f"CERTIFICO QUE HE RECIBIDO DE  {str(empresa.get('razon_social') or '').upper()}\n"
+                  "A MI ENTERA SATISFACCION, LA CANTIDAD INDICADA ANTERIORMENTE, COMO SALDO LIQUIDO DE MI SUELDO Y  "
+                  "NO TENGO CARGO NI COBRO ALGUNO POSTERIOR QUE HACER, POR NINGUNO DE LOS MOTIVOS COMPRENDIDOS EN "
+                  "ESTA LIQUIDACION.")
+    r.font.name, r.font.size = FONT, Pt(8)
+    for _ in range(4):
+        par("", after=6)
+    firma = doc.add_table(rows=3, cols=2)
+    _sin_bordes(firma)
+    _txt(firma.cell(0, 1), "_____________________________", size=9, align="center")
+    _txt(firma.cell(1, 1), "FIRMA DEL TRABAJADOR", size=8, align="center")
+    _txt(firma.cell(2, 1), "RECIBI COPIA", size=8, align="center")
+    _anchos(firma, [11.0, 7.6])
 
     doc.save(ruta)
     return ruta
@@ -490,12 +531,28 @@ def generar_comprobante_feriado_docx(empresa, trabajador, vac, contrato, ruta):
     return ruta
 
 
-def _parrafo(doc, texto="", bold=False, size=11, align=None, space_after=6):
+def _formato_documento(doc):
+    """Carta, márgenes 2,5 cm, Arial 11, texto justificado, interlineado 1,15."""
+    for sec in doc.sections:
+        sec.page_width, sec.page_height = Cm(21.59), Cm(27.94)
+        sec.top_margin = sec.bottom_margin = Cm(2.2)
+        sec.left_margin = sec.right_margin = Cm(2.5)
+    st = doc.styles["Normal"]
+    st.font.name = "Arial"
+    st.font.size = Pt(11)
+    st.element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    pf = st.paragraph_format
+    pf.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    pf.line_spacing = 1.15
+    pf.space_after = Pt(8)
+
+
+def _parrafo(doc, texto="", bold=False, size=11, align="justify", space_after=8, sangria_cm=0):
     p = doc.add_paragraph()
-    if align == "center":
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    elif align == "justify":
-        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.alignment = {"center": WD_ALIGN_PARAGRAPH.CENTER, "left": WD_ALIGN_PARAGRAPH.LEFT,
+                   "right": WD_ALIGN_PARAGRAPH.RIGHT}.get(align, WD_ALIGN_PARAGRAPH.JUSTIFY)
+    if sangria_cm:
+        p.paragraph_format.left_indent = Cm(sangria_cm)
     p.paragraph_format.space_after = Pt(space_after)
     if texto:
         r = p.add_run(texto)
@@ -508,7 +565,8 @@ def _parrafo(doc, texto="", bold=False, size=11, align=None, space_after=6):
 def _clausula(doc, titulo, texto):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p.paragraph_format.space_after = Pt(8)
+    p.paragraph_format.space_after = Pt(10)
+    p.paragraph_format.line_spacing = 1.15
     r = p.add_run(f"{titulo} ")
     r.bold = True
     r.font.name = "Arial"
@@ -525,17 +583,25 @@ def _nombre(t):
 
 def _firmas(doc, empresa, trabajador, etiqueta_trab="TRABAJADOR"):
     tabla = doc.add_table(rows=2, cols=2)
-    tabla.cell(0, 0).text = "_____________________________"
-    tabla.cell(0, 1).text = "_____________________________"
-    tabla.cell(1, 0).text = f"{empresa.get('razon_social')}\nRUT {empresa.get('rut')}\nEMPLEADOR"
-    tabla.cell(1, 1).text = f"{_nombre(trabajador)}\nRUN {trabajador.get('rut')}\n{etiqueta_trab}"
+    _sin_bordes(tabla)
+    textos = [("_______________________________", "_______________________________"),
+              (f"{empresa.get('razon_social')}\nRUT {empresa.get('rut')}\nEMPLEADOR",
+               f"{_nombre(trabajador).upper()}\nRUN {trabajador.get('rut')}\n{etiqueta_trab}")]
+    for i, fila in enumerate(textos):
+        for j, t in enumerate(fila):
+            cell = tabla.cell(i, j)
+            cell.text = ""
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_after = Pt(0)
+            r = p.add_run(t)
+            r.font.name, r.font.size = "Arial", Pt(10)
+    _anchos(tabla, [8.3, 8.3])
 
 
 def generar_contrato_docx(empresa, trabajador, contrato, ruta):
     doc = Document()
-    st = doc.styles["Normal"]
-    st.font.name = "Arial"
-    st.font.size = Pt(11)
+    _formato_documento(doc)
     _parrafo(doc, "CONTRATO DE TRABAJO", bold=True, size=14, align="center", space_after=12)
 
     p = _parrafo(doc, align="justify")
@@ -571,8 +637,11 @@ def generar_contrato_docx(empresa, trabajador, contrato, ruta):
     if float(contrato.get("colacion") or 0) > 0:
         lineas.append(f"d) Asignación de colación: $ {C.fmt_clp(contrato.get('colacion'))} (no imponible, art. 41).")
     _clausula(doc, "TERCERO.-", "El empleador pagará al trabajador la siguiente remuneración, por períodos mensuales "
-              "vencidos, el último día hábil de cada mes: " + " ".join(lineas) +
-              " De las remuneraciones se deducirán los impuestos y cotizaciones de seguridad social que correspondan.")
+              "vencidos, el último día hábil de cada mes:")
+    letras = "abcdefgh"
+    for i, ln in enumerate(lineas):
+        _parrafo(doc, letras[i] + ")" + ln[2:], sangria_cm=1.0, space_after=4)
+    _parrafo(doc, "De las remuneraciones se deducirán los impuestos y cotizaciones de seguridad social que correspondan.")
 
     tipo = contrato.get("tipo_contrato") or "Indefinido"
     if tipo == "Plazo Fijo" and contrato.get("fecha_termino"):
@@ -597,9 +666,7 @@ def generar_contrato_docx(empresa, trabajador, contrato, ruta):
 def generar_finiquito_docx(empresa, trabajador, fin, contrato, ruta):
     """fin: resultado de finiquitos.calcular_finiquito (o fila de la tabla finiquitos)."""
     doc = Document()
-    st = doc.styles["Normal"]
-    st.font.name = "Arial"
-    st.font.size = Pt(11)
+    _formato_documento(doc)
     _parrafo(doc, "FINIQUITO DE CONTRATO DE TRABAJO", bold=True, size=14, align="center", space_after=12)
     nombre = _nombre(trabajador)
 

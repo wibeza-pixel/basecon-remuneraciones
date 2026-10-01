@@ -114,6 +114,16 @@ def actualizar_usuario(uid: int, **campos):
         conn.close()
 
 
+def fecha_vencimiento(u: dict) -> date | None:
+    """Fecha de término del acceso (None = sin plazo). Si el plazo es en días y aún no entra, cuenta desde hoy."""
+    if u.get("fecha_expira"):
+        return C.a_fecha(u["fecha_expira"])
+    if u.get("dias_acceso"):
+        inicio = C.a_fecha(u.get("primer_acceso")) or date.today()
+        return inicio + timedelta(days=int(u["dias_acceso"]))
+    return None
+
+
 def dias_restantes(u: dict, hoy: date | None = None) -> int | None:
     hoy = hoy or date.today()
     if u.get("fecha_expira"):
