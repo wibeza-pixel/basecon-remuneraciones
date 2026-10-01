@@ -34,6 +34,31 @@ st.set_page_config(page_title="BASECON — Remuneraciones Chile",
                    page_icon=str(_favicon) if _favicon.exists() else "🇨🇱",
                    layout="wide", initial_sidebar_state="expanded")
 
+# Menú lateral con letra más grande y más espacio entre opciones
+st.markdown("""
+<style>
+section[data-testid="stSidebar"][aria-expanded="true"] {
+    min-width: 20rem !important;
+    width: 20rem !important;
+}
+section[data-testid="stSidebar"] div[role="radiogroup"] label p {
+    font-size: 1.15rem !important;
+}
+section[data-testid="stSidebar"] div[role="radiogroup"] label {
+    padding: 0.35rem 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+section[data-testid="stSidebar"] button p {
+    font-size: 1.05rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 @st.cache_resource
 def _inicializar(destino: str):
