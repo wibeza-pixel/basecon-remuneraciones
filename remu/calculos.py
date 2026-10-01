@@ -347,7 +347,7 @@ def numero_a_palabras(n) -> str:
     miles, unidades = divmod(resto, 1000)
     out = []
     if millones:
-        out.append("UN MILLON" if millones == 1 else f"{numero_a_palabras(millones)} MILLONES")
+        out.append("UN MILLÓN" if millones == 1 else f"{numero_a_palabras(millones)} MILLONES")
     if miles:
         out.append("MIL" if miles == 1 else f"{_999(miles)} MIL")
     if unidades:
