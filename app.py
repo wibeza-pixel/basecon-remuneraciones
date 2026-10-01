@@ -34,9 +34,41 @@ st.set_page_config(page_title="BASECON — Remuneraciones Chile",
                    page_icon=str(_favicon) if _favicon.exists() else "🇨🇱",
                    layout="wide", initial_sidebar_state="expanded")
 
-# Menú lateral con letra más grande y más espacio entre opciones
+# Letra más grande y color más fuerte en toda la app; menú lateral más amplio
 st.markdown("""
 <style>
+/* Texto general */
+html, body, [data-testid="stAppViewContainer"] { color: #111111; }
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] li { font-size: 1.05rem; color: #111111; }
+/* Títulos de pantalla y secciones */
+[data-testid="stMain"] h1 { color: #0b1f3a !important; font-weight: 800 !important; }
+[data-testid="stMain"] h2 { color: #0b1f3a !important; font-weight: 800 !important; font-size: 2rem !important; }
+[data-testid="stMain"] h3 { color: #0b1f3a !important; font-weight: 700 !important; font-size: 1.5rem !important; }
+/* Etiquetas de cada campo (Usuario, Nombre, RUT, Periodo...) */
+[data-testid="stMain"] [data-testid="stWidgetLabel"] p,
+[data-testid="stMain"] [data-testid="stWidgetLabel"] label {
+    font-size: 1.08rem !important; font-weight: 700 !important; color: #111111 !important;
+}
+/* Texto dentro de los campos y listas */
+[data-testid="stMain"] input, [data-testid="stMain"] textarea, [data-testid="stMain"] [data-baseweb="select"] div { font-size: 1.05rem !important; color: #111111 !important; }
+/* Encabezados de los desplegables (➕ Nuevo..., ✏️ Modificar...) */
+[data-testid="stMain"] [data-testid="stExpander"] summary p {
+    font-size: 1.15rem !important; font-weight: 700 !important; color: #0b1f3a !important;
+}
+/* Pestañas */
+[data-testid="stMain"] [data-baseweb="tab"] p { font-size: 1.1rem !important; font-weight: 700 !important; }
+/* Indicadores del dashboard */
+[data-testid="stMain"] [data-testid="stMetricLabel"] p { font-size: 1.05rem !important; font-weight: 700 !important; color: #111111 !important; }
+[data-testid="stMain"] [data-testid="stMetricValue"],
+[data-testid="stMain"] [data-testid="stMetricValue"] p,
+[data-testid="stMain"] [data-testid="stMetricValue"] div { font-size: 2.3rem !important; font-weight: 700 !important; color: #0b1f3a !important; }
+/* Botones */
+[data-testid="stMain"] button p { font-size: 1.05rem !important; font-weight: 600 !important; }
+/* Notas pequeñas (captions) más legibles */
+[data-testid="stMain"] [data-testid="stCaptionContainer"] { font-size: 0.98rem !important; color: #333333 !important; }
+/* Menú lateral */
+section[data-testid="stSidebar"] div[role="radiogroup"] label p { color: #111111 !important; font-weight: 500; }
 section[data-testid="stSidebar"][aria-expanded="true"] {
     min-width: 20rem !important;
     width: 20rem !important;
@@ -138,6 +170,38 @@ def descargar(ruta: Path, etiqueta: str, key: str, mime=None):
             st.download_button(etiqueta, f.read(), file_name=Path(ruta).name, key=key, mime=mime)
 
 
+CONTACTO_CAMPOS = [("contacto_nombre", "Nombre / empresa de soporte"), ("contacto_telefono", "Teléfono"),
+                   ("contacto_whatsapp", "WhatsApp"), ("contacto_email", "Correo"),
+                   ("contacto_horario", "Horario de atención")]
+
+
+def leer_contacto() -> dict:
+    conn = db.get_conn()
+    try:
+        return {k: (db.scalar(conn, "SELECT valor FROM configuracion WHERE clave=?", (k,)) or "").strip()
+                for k, _ in CONTACTO_CAMPOS}
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+def texto_contacto(ct: dict) -> str:
+    partes = []
+    if ct.get("contacto_nombre"):
+        partes.append(f"**{ct['contacto_nombre']}**")
+    if ct.get("contacto_telefono"):
+        partes.append(f"📞 {ct['contacto_telefono']}")
+    if ct.get("contacto_whatsapp"):
+        num = "".join(ch for ch in ct["contacto_whatsapp"] if ch.isdigit())
+        partes.append(f"💬 [WhatsApp {ct['contacto_whatsapp']}](https://wa.me/{num})" if num else f"💬 {ct['contacto_whatsapp']}")
+    if ct.get("contacto_email"):
+        partes.append(f"✉️ [{ct['contacto_email']}](mailto:{ct['contacto_email']})")
+    if ct.get("contacto_horario"):
+        partes.append(f"🕘 {ct['contacto_horario']}")
+    return "  \n".join(partes)
+
+
 def mostrar_advertencias(adv, titulo=None):
     if adv:
         st.warning((f"**{titulo}**\n\n" if titulo else "") + "\n".join(f"- {a}" for a in adv))
@@ -196,6 +260,9 @@ def pantalla_login():
                     st.session_state["bloqueo_hasta"] = time.time() + 30
                     st.session_state["intentos"] = 0
                 st.error(motivo)
+        ct = texto_contacto(leer_contacto())
+        if ct:
+            st.markdown("**¿Necesita ayuda o una cuenta de prueba?**  \n" + ct)
     st.stop()
 
 
@@ -543,8 +610,10 @@ def pantalla_liquidaciones(conn):
         st.error("Los indicadores del periodo no tienen UTM: no se puede calcular el impuesto único.")
         return
     ref = K.tasas_reforma_ley_21735(periodo)
-    st.info(f"UF ${ind['uf']:,.2f} · UTM ${ind['utm']:,.0f} · Tope AFP ${ind['tope_afp']:,.0f} · "
-            f"{ref['descripcion']}".replace(",", "X").replace(".", ",").replace("X", "."))
+    def _cl(v, dec=0):
+        return f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    st.info(f"UF \\${_cl(ind['uf'], 2)} · UTM \\${_cl(ind['utm'])} · Tope AFP \\${_cl(ind['tope_afp'])} · "
+            + ref["descripcion"].replace("$", "\\$"))
     movs, est = ui_rrhh.resumen_movimientos_para_liquidacion(conn, emp, periodo)
     conts = db.rows(conn, """SELECT c.id, t.id AS tid, t.rut, t.nombres, t.apellido_paterno
                              FROM contratos c JOIN trabajadores t ON c.trabajador_id=t.id
@@ -912,11 +981,29 @@ def pantalla_usuarios(conn):
                     except Exception as ex:
                         st.error(str(ex))
 
+    with st.expander("📞 Datos de contacto para ayuda"):
+        st.caption("Se muestran en la pantalla de ingreso, en el menú lateral y en Ayuda, para todos los usuarios. "
+                   "Deje vacío lo que no quiera mostrar.")
+        actual = leer_contacto()
+        with st.form("contacto"):
+            a, b = st.columns(2)
+            nuevos = {k: (a if i % 2 == 0 else b).text_input(lab, value=actual.get(k, ""), key=f"ct_{k}")
+                      for i, (k, lab) in enumerate(CONTACTO_CAMPOS)}
+            if st.form_submit_button("Guardar contacto"):
+                for k, v in nuevos.items():
+                    db.upsert(conn, "configuracion", {"clave": k, "valor": v.strip()}, ["clave"])
+                conn.commit()
+                st.success("Datos de contacto guardados.")
+                st.rerun()
+
 
 def pantalla_ayuda(_conn):
     st.header("Ayuda")
+    ct = texto_contacto(leer_contacto())
+    if ct:
+        st.info("**¿Dudas o problemas? Contáctenos:**  \n" + ct)
     st.markdown(f"""
-**Versión 2.1** — ver `CAMBIOS.md`.
+**Versión 2.3** — ver `CAMBIOS.md`.
 
 **Módulos y permisos.** Cada usuario tiene empresas y módulos asignados (menú Usuarios):
 - *Movimientos RRHH*: trabajadores, movimientos del mes (asistencia, licencias, horas extra, anticipos, bonos,
@@ -980,6 +1067,9 @@ def main():
     if st.sidebar.button("Cerrar sesión"):
         st.session_state.clear()
         st.rerun()
+    ct = texto_contacto(leer_contacto())
+    if ct:
+        st.sidebar.markdown("---\n**Ayuda y soporte**  \n" + ct)
 
     st.title("BASECON · Remuneraciones" if "remuneraciones" in mods else "BASECON · Movimientos RRHH")
     conn = db.get_conn()
