@@ -255,3 +255,32 @@ CODIGOS_LRE_CONCEPTO = {
     "Descuento": {3183: "Otros descuentos autorizados por el trabajador", 3186: "Pensión de alimentos",
                   3110: "Crédito social CCAF", 3185: "Otros descuentos (art. 58)", 3181: "Cuota vivienda o educación"},
 }
+
+
+def cotiza_afp_efectivo(t: dict) -> bool:
+    """Pensionados (jubilados) no cotizan AFP salvo que lo hagan voluntariamente (DL 3.500 art. 69);
+    solo pagan salud 7%. Los demás cotizan, salvo exención expresa (cotiza_afp = 0)."""
+    if t.get("pensionado"):
+        return bool(t.get("afp_voluntaria_pensionado"))
+    return bool(t.get("cotiza_afp", 1) if t.get("cotiza_afp") is not None else 1)
+
+
+def validar_indicadores(ind: dict) -> list[str]:
+    """Controles de coherencia: evitan, por ejemplo, que se guarde la UF en el campo UTM."""
+    err = []
+    uf, utm = float(ind.get("uf") or 0), float(ind.get("utm") or 0)
+    uf_txt = f"{uf:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if not uf:
+        err.append("Falta la UF.")
+    if not utm:
+        err.append("Falta la UTM.")
+    if uf and utm and not (1.4 <= utm / uf <= 2.2):
+        err.append(f"La UTM cargada ({fmt_clp(utm)}) no es coherente con la UF ({uf_txt}): la UTM vale cerca de "
+                   "1,75 UF. Probablemente se cargó la UF en lugar de la UTM.")
+    ta = float(ind.get("tope_afp") or 0)
+    if uf and ta and not (80 <= ta / uf <= 100):
+        err.append(f"El tope imponible AFP ({fmt_clp(ta)}) no corresponde a unas 90 UF.")
+    rm = float(ind.get("renta_minima") or 0)
+    if uf and rm and not (8 <= rm / uf <= 25):
+        err.append(f"El ingreso mínimo ({fmt_clp(rm)}) no parece correcto.")
+    return err

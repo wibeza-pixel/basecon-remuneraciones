@@ -214,7 +214,7 @@ TABLAS = {
         cuenta_banco TEXT, banco TEXT, tipo_cuenta TEXT DEFAULT 'RUT',
         codigo TEXT, cargo TEXT, centro_costo TEXT,
         tramo_asignacion_familiar TEXT DEFAULT 'D', numero_cargas INTEGER DEFAULT 0,
-        pensionado INTEGER DEFAULT 0, cotiza_afp INTEGER DEFAULT 1,
+        pensionado INTEGER DEFAULT 0, cotiza_afp INTEGER DEFAULT 1, afp_voluntaria_pensionado INTEGER DEFAULT 0,
         activo INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(empresa_id, rut)""",
     "contratos": """
@@ -316,6 +316,7 @@ MIGRACIONES = [
     ("empresas", "centro_costo", "TEXT"),
     ("trabajadores", "sexo", "TEXT DEFAULT 'M'"), ("trabajadores", "pensionado", "INTEGER DEFAULT 0"),
     ("trabajadores", "cotiza_afp", "INTEGER DEFAULT 1"),
+    ("trabajadores", "afp_voluntaria_pensionado", "INTEGER DEFAULT 0"),
     ("trabajadores", "tramo_asignacion_familiar", "TEXT DEFAULT 'D'"),
     ("trabajadores", "numero_cargas", "INTEGER DEFAULT 0"),
     ("contratos", "tipo_gratificacion", "TEXT DEFAULT 'Monto fijo pactado'"),

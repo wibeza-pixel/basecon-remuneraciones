@@ -926,7 +926,7 @@ def generar_lre_csv(empresa_id, periodo, ruta):
             return None
         liqs = db.rows(conn, """
             SELECT l.*, t.rut, t.afp, t.salud, t.isapre, t.numero_cargas, t.tramo_asignacion_familiar,
-                   t.pensionado, t.cotiza_afp,
+                   t.pensionado, t.cotiza_afp, t.afp_voluntaria_pensionado,
                    c.tipo_contrato, c.fecha_inicio, c.fecha_termino AS contrato_termino, c.jornada_semanal
             FROM liquidaciones l
             JOIN trabajadores t ON l.trabajador_id = t.id
@@ -967,7 +967,7 @@ def generar_lre_csv(empresa_id, periodo, ruta):
             1105: emp.get("region_codigo") or "", 1106: emp.get("comuna_codigo") or "",
             1170: 1, 1107: 201 if jornada <= 30 else 101, 1108: 0,
             1109: 1 if l.get("pensionado") else 0,
-            1141: C.LRE_AFP.get(l.get("afp"), 100) if l.get("cotiza_afp", 1) else 100,
+            1141: C.LRE_AFP.get(l.get("afp"), 100) if C.cotiza_afp_efectivo(l) else 100,
             1142: 0,
             1143: C.LRE_SALUD.get(C.normalizar(l.get("isapre")), 102) if es_isapre else 102,
             1151: 0 if l.get("pensionado") else 1, 1110: ccaf, 1152: mutual,

@@ -58,7 +58,7 @@ def linea_previred(liq: dict, trab: dict, contrato: dict, empresa: dict, periodo
     fin_mes = C.fin_de_mes(periodo)
     ed = C.edad(trab.get("fecha_nacimiento"), fin_mes)
     es_isapre = C.normalizar(trab.get("salud")) == "ISAPRE"
-    cotiza_afp = bool(trab.get("cotiza_afp", 1))
+    cotiza_afp = C.cotiza_afp_efectivo(trab)
     pensionado = bool(trab.get("pensionado"))
     if pensionado:
         tipo_trab = "1" if cotiza_afp else "2"

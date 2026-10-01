@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from . import calculos as K
+from . import config as C
 from . import db
 
 CAMPOS_MOV = ["dias_trabajados", "ausencias", "licencia", "licencia_desde", "licencia_hasta", "dias_vacaciones",
@@ -91,7 +92,7 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
     he_inp, ant_inp, dias_inp = he_inp or {}, ant_inp or {}, dias_inp or {}
     contratos = db.rows(conn, """
         SELECT c.*, t.id AS tid, t.afp, t.salud, t.pactado_salud_uf, t.numero_cargas, t.tramo_asignacion_familiar,
-               t.pensionado, t.cotiza_afp, t.fecha_nacimiento
+               t.pensionado, t.cotiza_afp, t.afp_voluntaria_pensionado, t.fecha_nacimiento
         FROM contratos c JOIN trabajadores t ON c.trabajador_id = t.id
         WHERE c.empresa_id = ? AND c.activo = 1""", (emp["id"],))
     movs = movimientos_periodo(conn, emp["id"], periodo) if usar_movimientos else {}
@@ -117,7 +118,7 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
             periodo=periodo, anticipo=e.get("anticipo", 0),
             tipo_gratificacion=c.get("tipo_gratificacion") or "Monto fijo pactado",
             afiliado_ccaf=bool(emp.get("caja_compensacion")), pensionado=bool(c.get("pensionado")),
-            cotiza_afp=bool(c.get("cotiza_afp", 1)), fecha_nacimiento=c.get("fecha_nacimiento"),
+            cotiza_afp=C.cotiza_afp_efectivo(c), fecha_nacimiento=c.get("fecha_nacimiento"),
             fecha_inicio_contrato=c.get("fecha_inicio"), he_detalle=e.get("he_detalle"),
             haberes_imponibles_extra=e.get("haberes_imponibles_extra"),
             haberes_no_imponibles_extra=e.get("haberes_no_imponibles_extra"),

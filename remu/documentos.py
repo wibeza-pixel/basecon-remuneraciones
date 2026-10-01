@@ -244,7 +244,7 @@ def generar_liquidacion_docx(empresa, trabajador, liq, periodo, ruta, indicadore
     tasa = tasas.get(trabajador.get("afp"))
     salud = "FONASA" if not es_isapre else (trabajador.get("isapre") or "ISAPRE").upper()
     desc = []
-    if float(liq.get("afp_monto") or 0) or trabajador.get("afp"):
+    if float(liq.get("afp_monto") or 0):  # pensionados sin cotización voluntaria: sin línea AFP
         etiqueta = (f"{float(tasa):.2f}".replace(".", ",") + f"  % {afp_nombre}") if tasa else afp_nombre or "AFP"
         desc.append((etiqueta, liq.get("afp_monto")))
     desc.append((f" 7,00  % {salud}", liq.get("salud_monto")))

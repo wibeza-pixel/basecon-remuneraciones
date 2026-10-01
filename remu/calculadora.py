@@ -21,7 +21,7 @@ def simular(indicadores: dict, periodo: str, sueldo_base: float, tipo_gratificac
         dias=30, afp_nombre=afp, salud_tipo=salud, isapre_pactado_uf=plan_isapre_uf, tipo_contrato=tipo_contrato,
         tasa_mutual=tasa_mutual, indicadores=indicadores, horas_extras=horas_extra_50, jornada_semanal=jornada,
         numero_cargas=numero_cargas, tramo_af=tramo_af or ("D" if not numero_cargas else None), periodo=periodo,
-        tipo_gratificacion=tipo_gratificacion, afiliado_ccaf=afiliado_ccaf, pensionado=pensionado, cotiza_afp=True,
+        tipo_gratificacion=tipo_gratificacion, afiliado_ccaf=afiliado_ccaf, pensionado=pensionado, cotiza_afp=not pensionado,
         haberes_imponibles_extra=extra)
     r["sueldo_base"] = int(round(sueldo_base))
     r["costo_empresa"] = int(r["total_haberes"] + r["carga_empleador_previsional"])
