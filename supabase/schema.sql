@@ -1,4 +1,4 @@
--- Esquema BASECON v2.1 para Postgres/Supabase (la app también lo crea sola al iniciar)
+-- Esquema BASECON v2.5 para Postgres/Supabase (la app también lo crea sola al iniciar)
 create schema if not exists basecon;
 set search_path to basecon;
 
@@ -128,4 +128,18 @@ CREATE TABLE IF NOT EXISTS usuarios (
 
 CREATE TABLE IF NOT EXISTS configuracion (
         clave TEXT PRIMARY KEY, valor TEXT
+);
+
+CREATE TABLE IF NOT EXISTS documentos_trabajador (
+        id BIGSERIAL PRIMARY KEY, empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+        trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id), tipo TEXT NOT NULL, periodo TEXT, fecha DATE,
+        descripcion TEXT, nombre_archivo TEXT NOT NULL, mime TEXT, tamano INTEGER, contenido BYTEA NOT NULL,
+        origen TEXT DEFAULT 'generado', ref_tabla TEXT, ref_id INTEGER, creado_por TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS anexos_contrato (
+        id BIGSERIAL PRIMARY KEY, contrato_id INTEGER NOT NULL REFERENCES contratos(id), empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+        trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id), fecha DATE, vigencia DATE, cambios TEXT,
+        documento_id INTEGER, creado_por TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
