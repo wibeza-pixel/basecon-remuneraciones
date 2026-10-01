@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from remu import calculadora as CALC
 from remu import calculos as K
 from remu import config as C
 from remu import db
@@ -67,6 +68,14 @@ html, body, [data-testid="stAppViewContainer"] { color: #111111; }
 [data-testid="stMain"] button p { font-size: 1.05rem !important; font-weight: 600 !important; }
 /* Notas pequeñas (captions) más legibles */
 [data-testid="stMain"] [data-testid="stCaptionContainer"] { font-size: 0.98rem !important; color: #333333 !important; }
+/* Mes activo destacado (esquina superior derecha) */
+.mes-activo { position: fixed; top: 0.5rem; right: 14rem; z-index: 999990; display: flex; align-items: center;
+    gap: 0.6rem; background: #0b1f3a; color: #ffffff; padding: 0.35rem 0.95rem; border-radius: 0.6rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.18); }
+.mes-activo-et { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; color: #f2a900; }
+.mes-activo-val { font-size: 1.15rem; font-weight: 800; letter-spacing: 0.02em; }
+@media (max-width: 640px) { .mes-activo { right: 3.2rem; padding: 0.25rem 0.6rem; }
+    .mes-activo-et { display: none; } .mes-activo-val { font-size: 0.95rem; } }
 /* Menú lateral */
 section[data-testid="stSidebar"] div[role="radiogroup"] label p { color: #111111 !important; font-weight: 500; }
 section[data-testid="stSidebar"][aria-expanded="true"] {
@@ -112,8 +121,49 @@ def periodo_default() -> str:
     return f"{hoy.year}-{hoy.month:02d}"
 
 
-def input_periodo(label="Periodo (AAAA-MM)", key=None, value=None) -> str:
-    p = st.text_input(label, value=value or periodo_default(), key=key).strip()
+def periodo_valido(p: str) -> bool:
+    try:
+        a, m = int(p[:4]), int(p[5:7])
+        return len(p) == 7 and p[4] == "-" and 1 <= m <= 12 and 2000 < a < 2100
+    except Exception:
+        return False
+
+
+def periodo_activo() -> str:
+    """Mes de trabajo de la sesión. Parte en el último mes con indicadores cargados (el que se está procesando)."""
+    if not st.session_state.get("periodo_activo"):
+        ult = None
+        try:
+            conn = db.get_conn()
+            try:
+                ult = db.scalar(conn, "SELECT MAX(periodo) AS p FROM indicadores WHERE periodo <= ?", (periodo_default(),))
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        st.session_state["periodo_activo"] = ult if ult and periodo_valido(ult) else periodo_default()
+    return st.session_state["periodo_activo"]
+
+
+def _sync_periodo(key):
+    v = (st.session_state.get(key) or "").strip()
+    if periodo_valido(v):
+        st.session_state["periodo_activo"] = v
+    else:
+        st.session_state["periodo_invalido"] = v
+
+
+def input_periodo(label="Periodo (AAAA-MM)", key=None, value=None, sincronizar=True) -> str:
+    """Campo de periodo. Parte en el mes activo; si se cambia aquí, pasa a ser el mes activo de toda la app."""
+    if sincronizar and key and value is None:
+        st.session_state[key] = periodo_activo()
+        p = st.text_input(label, key=key, on_change=_sync_periodo, args=(key,),
+                          help="Al cambiarlo aquí cambia el mes activo de toda la aplicación.").strip()
+        malo = st.session_state.pop("periodo_invalido", None)
+        if malo is not None:
+            st.warning(f"“{malo}” no es un periodo válido (use AAAA-MM, por ejemplo 2026-09). Se mantiene {p}.")
+    else:
+        p = st.text_input(label, value=value or periodo_activo(), key=key).strip()
     try:
         a, m = int(p[:4]), int(p[5:7])
         assert len(p) == 7 and p[4] == "-" and 1 <= m <= 12 and 2000 < a < 2100
@@ -121,6 +171,44 @@ def input_periodo(label="Periodo (AAAA-MM)", key=None, value=None) -> str:
         st.error("Periodo inválido. Use el formato AAAA-MM, por ejemplo 2026-08.")
         st.stop()
     return p
+
+
+def nombre_mes(periodo: str) -> str:
+    a, m = int(periodo[:4]), int(periodo[5:7])
+    return f"{C.MESES_ES[m - 1].capitalize()} {a}"
+
+
+def _cambiar_mes_activo():
+    st.session_state["periodo_activo"] = st.session_state["sel_mes_activo"]
+
+
+def selector_mes_activo():
+    """Selector en el menú lateral: últimos 24 meses y el próximo."""
+    act = periodo_activo()
+    hoy = date.today()
+    a, m = hoy.year, hoy.month + 1
+    if m == 13:
+        a, m = a + 1, 1
+    opciones = []
+    for _ in range(26):
+        opciones.append(f"{a}-{m:02d}")
+        m -= 1
+        if m == 0:
+            a, m = a - 1, 12
+    if act not in opciones:
+        opciones.insert(0, act)
+    st.session_state["sel_mes_activo"] = act
+    st.sidebar.selectbox("📅 Mes activo", opciones, key="sel_mes_activo", format_func=nombre_mes,
+                         on_change=_cambiar_mes_activo,
+                         help="Periodo con que se abren Movimientos, Liquidaciones, Libro, Previred e Indicadores.")
+
+
+def insignia_mes_activo():
+    """Mes activo destacado en la esquina superior derecha de la zona de trabajo."""
+    st.markdown(
+        f"""<div class="mes-activo"><span class="mes-activo-et">MES ACTIVO</span>
+        <span class="mes-activo-val">{nombre_mes(periodo_activo()).upper()}</span></div>""",
+        unsafe_allow_html=True)
 
 
 def usuario_actual() -> dict:
@@ -529,7 +617,7 @@ def pantalla_indicadores(conn):
             if res.get("faltantes"):
                 st.warning("No se pudieron leer: " + ", ".join(res["faltantes"]) +
                            ". Se conservará el valor anterior; complételos en la edición manual.")
-            per_pdf = input_periodo("Periodo a guardar", key="ind_pdf_per")
+            per_pdf = input_periodo("Periodo a guardar", key="ind_pdf_per", sincronizar=False)
             if st.button("Guardar indicadores del PDF"):
                 db.guardar_indicadores(conn, per_pdf, res)
                 conn.commit()
@@ -997,6 +1085,102 @@ def pantalla_usuarios(conn):
                 st.rerun()
 
 
+def pantalla_calculadora(conn):
+    st.header("Calculadora de sueldo")
+    st.caption("Simula un sueldo sin guardar nada. Usa el mismo cálculo de las liquidaciones: topes, gratificación, "
+               "impuesto único, seguro de cesantía y Ley 21.735.")
+    per = periodo_activo()
+    ind = db.get_indicadores(per, conn)
+    if not ind:
+        ult = db.scalar(conn, "SELECT MAX(periodo) AS p FROM indicadores")
+        if not ult:
+            st.error("No hay indicadores cargados. Cárguelos en **Indicadores** para usar la calculadora.")
+            return
+        per, ind = ult, db.get_indicadores(ult, conn)
+        st.warning(f"No hay indicadores de {nombre_mes(periodo_activo())}; se usan los de {nombre_mes(per)}.")
+    uf_txt = f"{float(ind.get('uf') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    st.info(f"Indicadores de **{nombre_mes(per)}** · UF \\${uf_txt} · UTM \\${C.fmt_clp(ind.get('utm'))} · "
+            f"Ingreso mínimo \\${C.fmt_clp(ind.get('renta_minima'))}")
+
+    modo = st.radio("¿Qué quiere calcular?", ["Sueldo base → líquido", "Líquido deseado → sueldo base"], horizontal=True)
+    a, b, c = st.columns(3)
+    if modo.startswith("Sueldo"):
+        monto = a.number_input("Sueldo base mensual ($)", min_value=0, value=int(ind.get("renta_minima") or 539000),
+                               step=10000, key="calc_base")
+    else:
+        monto = a.number_input("Líquido deseado ($)", min_value=0, value=800000, step=10000, key="calc_liq",
+                               help="Lo que el trabajador recibe a mano, incluida colación y movilización.")
+    tg = b.selectbox("Gratificación", C.TIPOS_GRATIFICACION, key="calc_tg")
+    gfija = c.number_input("Gratificación fija ($)", min_value=0, value=0, step=1000, key="calc_gf",
+                           disabled=not tg.startswith("Monto"))
+    col = a.number_input("Colación ($, no imponible)", min_value=0, value=0, step=1000, key="calc_col")
+    mov = b.number_input("Movilización ($, no imponible)", min_value=0, value=0, step=1000, key="calc_mov")
+    bono = c.number_input("Bono imponible mensual ($)", min_value=0, value=0, step=1000, key="calc_bono")
+    afp = a.selectbox("AFP", C.AFPS, index=C.AFPS.index("Habitat"), key="calc_afp")
+    salud = b.selectbox("Salud", ["FONASA", "ISAPRE"], key="calc_salud")
+    plan = c.number_input("Plan Isapre (UF)", min_value=0.0, value=0.0, step=0.1, format="%.2f", key="calc_plan",
+                          disabled=salud != "ISAPRE")
+    tipo = a.selectbox("Tipo de contrato", C.TIPOS_CONTRATO, key="calc_tipo")
+    jmax = C.jornada_maxima(C.fin_de_mes(per))
+    jornada = b.number_input("Jornada semanal (h)", min_value=1, max_value=jmax, value=jmax, key="calc_jor")
+    he = c.number_input("Horas extra 50% en el mes", min_value=0.0, value=0.0, step=1.0, key="calc_he")
+    with st.expander("Más opciones"):
+        d, e, f = st.columns(3)
+        cargas = d.number_input("Cargas familiares", min_value=0, value=0, key="calc_cargas")
+        tramo = e.selectbox("Tramo asignación familiar", ["A", "B", "C", "D"], index=3, key="calc_tramo")
+        mutual = f.number_input("Tasa mutual %", min_value=0.0, value=0.93, step=0.01, key="calc_mut")
+        ccaf = d.checkbox("Empresa afiliada a CCAF", key="calc_ccaf")
+        pens = e.checkbox("Pensionado", key="calc_pens")
+
+    params = dict(tipo_gratificacion=tg, gratificacion_fija=gfija, colacion=col, movilizacion=mov, bono_imponible=bono,
+                  horas_extra_50=he, jornada=int(jornada), afp=afp, salud=salud, plan_isapre_uf=plan, tipo_contrato=tipo,
+                  numero_cargas=int(cargas), tramo_af=tramo, pensionado=pens, tasa_mutual=mutual, afiliado_ccaf=ccaf)
+    try:
+        r = CALC.simular(ind, per, monto, **params) if modo.startswith("Sueldo") else \
+            CALC.sueldo_para_liquido(monto, ind, per, **params)
+    except ValueError as ex:
+        st.error(str(ex))
+        return
+
+    st.markdown("---")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Sueldo base", f"${C.fmt_clp(r['sueldo_base'])}")
+    m2.metric("Sueldo líquido", f"${C.fmt_clp(r['liquido'])}")
+    m3.metric("Costo empresa", f"${C.fmt_clp(r['costo_empresa'])}")
+
+    hab = [("Sueldo base", r["sueldo_calculado"]), ("Gratificación", r["gratificacion"]),
+           ("Horas extra", r["monto_horas_extras"]), ("Bono imponible", r["bonos_imponibles"]),
+           ("Total imponible", r["total_imponible"]), ("Colación", r["colacion"]), ("Movilización", r["movilizacion"]),
+           ("Asignación familiar", r["asignacion_familiar"]), ("TOTAL HABERES", r["total_haberes"])]
+    tasa_afp = float((ind.get("afp_tasas") or C.AFP_TASAS_DEFAULT).get(afp, 0) or 0)
+    des = [(f"AFP {afp} ({tasa_afp:.2f}%)".replace(".", ","), r["afp_monto"]), ("Salud 7%", r["salud_monto"]),
+           ("Adicional Isapre", r["adicional_isapre"]), ("Seguro de cesantía", r["afc_trabajador"]),
+           ("Impuesto único", r["impuesto_unico"]), ("TOTAL DESCUENTOS", r["total_descuentos"]),
+           ("LÍQUIDO A PAGAR", r["liquido"])]
+    crp_lbl = "Expectativa de vida" if r.get("reforma_etapa") == "1pct" else "Rentabilidad protegida"
+    emp = [("Cesantía empleador", r["afc_empleador"]), ("SIS", r["sis_monto"]),
+           ("Cuenta individual", r["reforma_afp_emp"]), (crp_lbl, r["reforma_crp"]),
+           ("Seguro Social", r["reforma_seguro_social"]), ("Mutual", r["mutual_monto"]),
+           ("TOTAL APORTES", r["carga_empleador_previsional"]), ("COSTO EMPRESA", r["costo_empresa"])]
+
+    def _tabla(filas):
+        return pd.DataFrame([(n, f"${C.fmt_clp(v)}") for n, v in filas if v or n.startswith(("TOTAL", "LÍQUIDO", "COSTO"))], columns=["Concepto", "Monto"])
+    cfg = {"Concepto": st.column_config.TextColumn(width="medium"), "Monto": st.column_config.TextColumn(width="small")}
+    t1, t2, t3 = st.columns(3)
+    t1.markdown("**Haberes**")
+    t1.dataframe(_tabla(hab), hide_index=True, width="stretch", column_config=cfg)
+    t2.markdown("**Descuentos del trabajador**")
+    t2.dataframe(_tabla(des), hide_index=True, width="stretch", column_config=cfg)
+    t3.markdown("**Aportes del empleador**")
+    t3.dataframe(_tabla(emp), hide_index=True, width="stretch", column_config=cfg)
+    st.caption(f"Base tributable \\${C.fmt_clp(r['base_tributable'])} · {r['reforma_descripcion']}. "
+               "Cuenta individual, rentabilidad protegida y Seguro Social corresponden a la Ley 21.735. "
+               "Simulación referencial para un mes completo (30 días)."
+               + ("" if modo.startswith("Sueldo") else " En el cálculo inverso el líquido puede quedar uno o dos pesos "
+                  "sobre lo pedido, por el redondeo de las cotizaciones."))
+    mostrar_advertencias(r["advertencias"], "Observaciones")
+
+
 def pantalla_ayuda(_conn):
     st.header("Ayuda")
     ct = texto_contacto(leer_contacto())
@@ -1044,6 +1228,8 @@ def main():
     st.sidebar.markdown(f"**{u.get('nombre') or u.get('usuario')}** · {u.get('rol')}  \n"
                         + " · ".join(C.MODULOS[m] for m in sorted(modulos())))
 
+    selector_mes_activo()
+
     mods = modulos()
     ctx = {"selector_empresa": selector_empresa, "input_periodo": input_periodo, "usuario": usuario_actual,
            "modulos": modulos, "advertencias": mostrar_advertencias}
@@ -1060,6 +1246,7 @@ def main():
             "💰 Liquidaciones": pantalla_liquidaciones, "📒 Libro de Remuneraciones": pantalla_libro,
             "🏖 Vacaciones": pantalla_vacaciones, "📝 Finiquitos": pantalla_finiquitos,
             "📤 Archivo Previred": pantalla_previred, "📋 DJ 1887": pantalla_1887})
+    pantallas["🧮 Calculadora de sueldo"] = pantalla_calculadora
     pantallas["ℹ️ Ayuda"] = pantalla_ayuda
     if es_admin():
         pantallas["🔐 Usuarios"] = pantalla_usuarios
@@ -1071,6 +1258,7 @@ def main():
     if ct:
         st.sidebar.markdown("---\n**Ayuda y soporte**  \n" + ct)
 
+    insignia_mes_activo()
     st.title("BASECON · Remuneraciones" if "remuneraciones" in mods else "BASECON · Movimientos RRHH")
     conn = db.get_conn()
     try:

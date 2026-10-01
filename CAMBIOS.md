@@ -1,3 +1,9 @@
+# BASECON v2.4 — Mes activo y calculadora de sueldo
+
+- **Mes activo destacado** arriba a la derecha (recuadro azul *MES ACTIVO · SEPTIEMBRE 2026*). Se cambia en el menú lateral (📅 Mes activo) o escribiendo otro periodo en cualquier pantalla. Movimientos, Liquidaciones, Libro, Previred e Indicadores se abren con ese mes. Al entrar, parte en el último mes con indicadores cargados.
+- **🧮 Calculadora de sueldo** (para todos los usuarios): sueldo base → líquido, o líquido deseado → sueldo base. Muestra haberes, descuentos, aportes del empleador y costo empresa. Usa el mismo cálculo de las liquidaciones y no guarda nada.
+- Manual actualizado.
+
 # BASECON v2.3 — Contacto de ayuda, legibilidad y seguridad
 
 - **Datos de contacto para ayuda.** El administrador los define en *Usuarios → Datos de contacto para ayuda* (nombre, teléfono, WhatsApp, correo, horario). Se muestran en la pantalla de ingreso, en el menú lateral y en *Ayuda*; WhatsApp y correo quedan como enlaces.
