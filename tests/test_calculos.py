@@ -129,3 +129,54 @@ def test_numero_a_palabras():
     assert numero_a_palabras(100) == "CIEN"
     assert numero_a_palabras(21) == "VEINTIUN"
     assert numero_a_palabras(2_000_000) == "DOS MILLONES"
+
+
+def test_pensionado_solo_paga_salud_y_exento_de_impuesto(base_temporal):
+    """Caso real reportado: jubilado con imponible $779.560 → solo Fonasa 7%, sin AFP ni cesantía, sin impuesto."""
+    from remu import config as C
+    from remu import db
+    from remu.calculos import calcular_liquidacion
+    conn = db.get_conn()
+    ind = dict(db.get_indicadores("2026-08", conn))
+    conn.close()
+    trab = {"pensionado": 1, "cotiza_afp": 1, "afp_voluntaria_pensionado": 0}
+    assert C.cotiza_afp_efectivo(trab) is False
+    r = calcular_liquidacion(623_648, 0, 0, 0, 0, 30, "Capital", "FONASA", 0, "Indefinido", 0.93, ind,
+                             periodo="2026-09", tipo_gratificacion="Art. 50 (25% con tope 4,75 IMM)",
+                             pensionado=True, cotiza_afp=C.cotiza_afp_efectivo(trab))
+    assert r["total_imponible"] == 779_560
+    assert r["afp_monto"] == 0 and r["afc_trabajador"] == 0 and r["afc_empleador"] == 0
+    assert r["salud_monto"] == round(779_560 * 0.07)
+    assert r["impuesto_unico"] == 0
+    assert r["liquido"] == 779_560 - r["salud_monto"]
+    # pensionado que cotiza voluntariamente
+    assert C.cotiza_afp_efectivo({"pensionado": 1, "afp_voluntaria_pensionado": 1}) is True
+    # no pensionado: cotiza salvo exención
+    assert C.cotiza_afp_efectivo({"pensionado": 0, "cotiza_afp": 1}) is True
+    assert C.cotiza_afp_efectivo({"pensionado": 0, "cotiza_afp": 0}) is False
+
+
+def test_validar_indicadores_detecta_uf_en_utm():
+    from remu import config as C
+    bueno = {"uf": 41_057.22, "utm": 71_900, "tope_afp": 3_695_148, "renta_minima": 553_553}
+    assert C.validar_indicadores(bueno) == []
+    malo = dict(bueno, utm=41_057)
+    assert any("UTM" in e for e in C.validar_indicadores(malo))
+
+
+def test_pdf_toma_utm_correcta_y_uf_del_ultimo_dia():
+    from remu.pdf_indicadores import parse_texto
+    texto = """INDICADORES PREVISIONALES SEPTIEMBRE 2026
+VALOR UF
+Al 31 de agosto del 2026: $ 40.873,77
+Al 30 de septiembre del 2026: $ 41.057,22
+VALOR UTM UTA
+Septiembre 2026 $ 71.900 $ 862.800
+RENTAS TOPES IMPONIBLES
+Para afiliados a una AFP (90 UF): $ 3.695.148
+Para Seguro de Cesantía (135,2 UF): $ 5.550.933
+"""
+    r = parse_texto(texto)
+    assert r["uf"] == 41_057.22
+    assert r["utm"] == 71_900
+    assert r["tope_afp"] == 3_695_148 and r["tope_afc"] == 5_550_933
