@@ -61,9 +61,43 @@ def parse_texto(text: str) -> dict:
         if m:
             afp_tasas[afp] = float(m.group(1).replace(",", "."))
 
+       # NUEVO: Tope IPS ex-INP
+    tope_inp_match = re.search(r"afiliados al IPS.*?\$\s*([\d.]+)", text, re.IGNORECASE | re.DOTALL)
+    tope_inp = float(tope_inp_match.group(1).replace(".", "")) if tope_inp_match else None
+
+    # NUEVO: Renta mínima (IMM)
+    renta_minima = None
+    for pat_rm in (
+        r"Trab\.?\s*Dependientes\s*e?\s*Independientes.*?\$\s*([\d.]+)",
+        r"RENTAS?\s+M[IÍ]NIMAS?\s+IMPONIBLES.*?\$\s*([\d.]+)",
+    ):
+        m_rm = re.search(pat_rm, text, re.IGNORECASE | re.DOTALL)
+        if m_rm:
+            v_rm = float(m_rm.group(1).replace(".", ""))
+            if 300_000 <= v_rm <= 2_000_000:
+                renta_minima = v_rm
+                break
+
+    # NUEVO: Tasa CCAF
+    ccaf_match = re.search(r"CCAF\s+([\d,]+)\s*%", text, re.IGNORECASE)
+    tasa_ccaf = float(ccaf_match.group(1).replace(",", ".")) if ccaf_match else None
+
+    # NUEVO: Asignación familiar
+    af_tramos = {}
+    for tramo in ["A", "B", "C"]:
+        m_af = re.search(rf"Tramo\s+{tramo}\s*:?\s*\$?\s*([\d.]+)", text, re.IGNORECASE)
+        if m_af:
+            af_tramos[tramo] = float(m_af.group(1).replace(".", ""))
+
     return {
-        "uf": uf, "utm": utm, "tope_afp": tope_afp, "tope_afc": tope_afc, "sis_tasa": sis, "afp_tasas": afp_tasas,
-        "faltantes": [k for k, v in (("uf", uf), ("utm", utm), ("tope_afp", tope_afp), ("tope_afc", tope_afc)) if v is None],
+        "uf": uf, "utm": utm, "tope_afp": tope_afp, "tope_afc": tope_afc,
+        "tope_inp": tope_inp, "renta_minima": renta_minima,
+        "tasa_ccaf_salud": tasa_ccaf, "af_tramos": af_tramos,
+        "sis_tasa": sis, "afp_tasas": afp_tasas,
+        "faltantes": [k for k, v in (
+            ("uf", uf), ("utm", utm), ("tope_afp", tope_afp), ("tope_afc", tope_afc),
+            ("tope_inp", tope_inp), ("renta_minima", renta_minima), ("tasa_ccaf", tasa_ccaf),
+        ) if v is None],
         "texto_completo": text[:500],
     }
 
