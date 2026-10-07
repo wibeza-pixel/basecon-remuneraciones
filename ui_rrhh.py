@@ -76,13 +76,22 @@ def pantalla_movimientos(conn, ctx):
         f["Observación"] = m.get("observacion") or ""
         filas.append(f)
     df = pd.DataFrame(filas)
+    # Reordenar columnas: Ausencias y Días licencia después de Trabajador
+    # Se eliminan "Días trab." (calculado internamente por procesos.py), "Días del mes" y "Días trab. (auto)"
+    _orden = ["id", "RUT", "Trabajador", "Ausencias", "Días licencia"]
+    _orden += [c for c in df.columns if c not in _orden and c not in ("Días del mes", "Días trab.", "Días trab. (auto)")]
+    df = df[_orden]
     cfg = {"id": None, "RUT": st.column_config.TextColumn(disabled=True),
            "Trabajador": st.column_config.TextColumn(disabled=True, width="medium")}
     for _, lab, tipo in COLUMNAS:
+        if lab == "Días trab.":
+            continue  # no se muestra (lo calcula procesos.py a partir de Ausencias y Días licencia)
         cfg[lab] = st.column_config.DateColumn(lab, format="DD-MM-YYYY") if tipo == "fecha" else \
             st.column_config.NumberColumn(lab, min_value=0.0, step=0.5 if "Días" in lab or "(h)" in lab or "Hrs" in lab else 1.0)
     if bloqueado:
         st.warning(f"El periodo está **{estado}**: solo Remuneraciones puede modificarlo o reabrirlo.")
+    st.caption("Los **días trabajados** se calculan automáticamente (mes comercial de 30 días − ausencias − días de licencia) "
+               "al generar las liquidaciones.")
     ed = st.data_editor(df, column_config=cfg, hide_index=True, disabled=bloqueado, width="stretch",
                         key=f"mov_ed_{emp['id']}_{periodo}_{ver_valores}")
 
@@ -93,8 +102,8 @@ def pantalla_movimientos(conn, ctx):
     avisos = []
     for _, r in ed.iterrows():
         dl = float(r["Días licencia"] or 0)
-        if float(r["Días trab."] or 0) + float(r["Ausencias"] or 0) + dl > 30:
-            avisos.append(f"{r['Trabajador']}: días trabajados + ausencias + licencia superan 30.")
+        if float(r["Ausencias"] or 0) + dl > 30:
+            avisos.append(f"{r['Trabajador']}: ausencias + días de licencia superan 30.")
         if dl and (pd.isna(r["Licencia desde"]) or pd.isna(r["Licencia hasta"])):
             avisos.append(f"{r['Trabajador']}: informe las fechas de la licencia (Previred las exige).")
     ctx["advertencias"](avisos, "Revisar")
@@ -104,6 +113,10 @@ def pantalla_movimientos(conn, ctx):
         for _, r in ed.iterrows():
             val = {}
             for k, lab, tipo in COLUMNAS:
+                if lab not in r:
+                    # Columna no visible (ej. "Días trab."): conservar valor anterior
+                    val[k] = float((movs.get(int(r["id"])) or {}).get(k) or 0)
+                    continue
                 v = r[lab]
                 val[k] = (C.a_fecha(v) if not pd.isna(v) else None) if tipo == "fecha" else float(v or 0)
             if ver_valores:
