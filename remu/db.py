@@ -307,6 +307,33 @@ TABLAS = {
         id {PK}, contrato_id INTEGER NOT NULL REFERENCES contratos(id), empresa_id INTEGER NOT NULL REFERENCES empresas(id),
         trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id), fecha DATE, vigencia DATE, cambios TEXT,
         documento_id INTEGER, creado_por TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP""",
+    "prestamos": """
+        id {PK},
+        empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+        trabajador_id INTEGER NOT NULL REFERENCES trabajadores(id),
+        tipo TEXT NOT NULL,
+        descripcion TEXT,
+        monto_total {REAL},
+        cuota_mensual {REAL} NOT NULL,
+        num_cuotas INTEGER NOT NULL,
+        cuota_actual INTEGER DEFAULT 1,
+        saldo_pendiente {REAL},
+        fecha_inicio TEXT NOT NULL,
+        fecha_otorgado DATE,
+        activo INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    """,
+    "prestamos_cuotas": """
+        id {PK},
+        prestamo_id INTEGER NOT NULL REFERENCES prestamos(id),
+        numero_cuota INTEGER NOT NULL,
+        periodo TEXT NOT NULL,
+        monto {REAL} NOT NULL,
+        estado TEXT DEFAULT 'pendiente',
+        fecha_pago DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(prestamo_id, numero_cuota)
+    """,
 }
 
 # Columnas agregadas en v2 (para bases existentes de la v1)
@@ -343,6 +370,8 @@ MIGRACIONES = [
     ("finiquitos", "anos_pagar", "INTEGER DEFAULT 0"), ("finiquitos", "feriado_dias_corridos", "{REAL}"),
     ("finiquitos", "valor_dia_feriado", "{REAL}"), ("finiquitos", "descuento_afc", "{REAL} DEFAULT 0"),
     ("finiquitos", "otros_descuentos", "{REAL} DEFAULT 0"), ("finiquitos", "detalle", "TEXT"),
+    ("liquidaciones", "prestamo_empresa", "{REAL} DEFAULT 0"),
+    ("liquidaciones", "prestamo_ccaf", "{REAL} DEFAULT 0"),
 ]
 
 

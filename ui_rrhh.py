@@ -30,12 +30,39 @@ def _nombre(t):
     return f"{t.get('apellido_paterno') or ''} {t.get('apellido_materno') or ''}, {t.get('nombres') or ''}".strip(" ,")
 
 
+def _resumen_mov(m):
+    """Resumen corto de los movimientos NO cero del trabajador."""
+    partes = []
+    if float(m.get("ausencias") or 0):
+        partes.append(f"Aus: {int(float(m['ausencias']))}")
+    if float(m.get("licencia") or 0):
+        partes.append(f"Lic: {int(float(m['licencia']))}")
+    if float(m.get("cant_he_50") or 0):
+        partes.append(f"HE 50%: {float(m['cant_he_50']):g}h")
+    if float(m.get("cant_he_100") or 0):
+        partes.append(f"HE 100%: {float(m['cant_he_100']):g}h")
+    if float(m.get("dias_vacaciones") or 0):
+        partes.append(f"Vac: {int(float(m['dias_vacaciones']))}")
+    if float(m.get("anticipo") or 0):
+        partes.append(f"Anticipo: {C.fmt_clp(m['anticipo'])}")
+    if float(m.get("bono_desempeno") or 0):
+        partes.append(f"Bono: {C.fmt_clp(m['bono_desempeno'])}")
+    if float(m.get("aguinaldo") or 0):
+        partes.append(f"Aguinaldo: {C.fmt_clp(m['aguinaldo'])}")
+    if float(m.get("colacion") or 0):
+        partes.append(f"Colación: {C.fmt_clp(m['colacion'])}")
+    if float(m.get("movilizacion") or 0):
+        partes.append(f"Mov: {C.fmt_clp(m['movilizacion'])}")
+    return " | ".join(partes) if partes else "Sin movimientos cargados"
+
+
 def pantalla_movimientos(conn, ctx):
     st.header("Movimientos del mes")
     if st.session_state.get("mov_msg"):
         st.success(st.session_state.pop("mov_msg"))
     st.caption("Asistencia, licencias, horas extra, anticipos, bonos y otros movimientos. "
-               "Remuneraciones los toma automáticamente al calcular las liquidaciones.")
+               "Remuneraciones los toma automáticamente al calcular las liquidaciones. "
+               "Los días trabajados se calculan como 30 menos ausencias y días de licencia al generar la liquidación.")
     emp = ctx["selector_empresa"](conn, "mov_emp")
     periodo = ctx["input_periodo"](key="mov_per")
     u = ctx["usuario"]()
@@ -48,114 +75,174 @@ def pantalla_movimientos(conn, ctx):
     c1.metric("Estado del periodo", estado)
     if est.get("enviado_por"):
         c2.caption(f"Último cambio: {est['enviado_por']} · {str(est.get('enviado_at') or '')[:16]}")
+
     trabs = db.rows(conn, "SELECT * FROM trabajadores WHERE empresa_id=? AND activo=1 ORDER BY apellido_paterno, nombres",
                     (emp["id"],))
     if not trabs:
-        st.info("No hay trabajadores activos. Agréguelos en **Trabajadores** (puede importarlos desde Excel).")
+        st.info("No hay trabajadores activos. Agréguelos en **Ficha del Personal** (puede importarlos desde Excel).")
         return
     conceptos = PR.conceptos_empresa(conn, emp["id"])
     movs = PR.movimientos_periodo(conn, emp["id"], periodo)
     ver_valores = st.toggle("Informar valores en pesos de horas extra (si no, se calculan con el sueldo del contrato)",
                             value=any(float(m.get(k) or 0) for m in movs.values() for k, _ in COLUMNAS_VALOR))
 
-    filas = []
-    for t in trabs:
-        m = movs.get(t["id"]) or {}
-        f = {"id": t["id"], "RUT": t["rut"], "Trabajador": _nombre(t)}
-        for k, lab, tipo in COLUMNAS:
-            v = m.get(k)
-            if tipo == "fecha":
-                f[lab] = C.a_fecha(v)
-            else:
-                f[lab] = float(v) if v is not None else (30.0 if k == "dias_trabajados" else 0.0)
-        if ver_valores:
-            for k, lab in COLUMNAS_VALOR:
-                f[lab] = float(m.get(k) or 0)
-        for cpt in conceptos:
-            f[f"{cpt['nombre']} ({cpt['tipo'][:4]}.)"] = float((m.get("extras") or {}).get(str(cpt["id"]), 0) or 0)
-        f["Observación"] = m.get("observacion") or ""
-        filas.append(f)
-    df = pd.DataFrame(filas)
-    # Reordenar columnas: Ausencias y Días licencia después de Trabajador
-    # Se eliminan "Días trab." (calculado internamente por procesos.py), "Días del mes" y "Días trab. (auto)"
-    _orden = ["id", "RUT", "Trabajador", "Ausencias", "Días licencia"]
-    _orden += [c for c in df.columns if c not in _orden and c not in ("Días del mes", "Días trab.", "Días trab. (auto)")]
-    df = df[_orden]
-    cfg = {"id": None, "RUT": st.column_config.TextColumn(disabled=True),
-           "Trabajador": st.column_config.TextColumn(disabled=True, width="medium")}
-    for _, lab, tipo in COLUMNAS:
-        if lab == "Días trab.":
-            continue  # no se muestra (lo calcula procesos.py a partir de Ausencias y Días licencia)
-        cfg[lab] = st.column_config.DateColumn(lab, format="DD-MM-YYYY") if tipo == "fecha" else \
-            st.column_config.NumberColumn(lab, min_value=0.0, step=0.5 if "Días" in lab or "(h)" in lab or "Hrs" in lab else 1.0)
+    # Buscador
+    buscar = st.text_input("🔍 Buscar trabajador (RUT, nombre o apellido)", key="mov_buscar").strip().upper()
+    if buscar:
+        trabs_filtrados = [t for t in trabs if buscar in (t.get("rut") or "").upper()
+                           or buscar in _nombre(t).upper()]
+    else:
+        trabs_filtrados = trabs
+
+    st.caption(f"Mostrando {len(trabs_filtrados)} de {len(trabs)} trabajadores.")
+
     if bloqueado:
         st.warning(f"El periodo está **{estado}**: solo Remuneraciones puede modificarlo o reabrirlo.")
-    st.caption("Los **días trabajados** se calculan automáticamente (mes comercial de 30 días − ausencias − días de licencia) "
-               "al generar las liquidaciones.")
-    ed = st.data_editor(df, column_config=cfg, hide_index=True, disabled=bloqueado, width="stretch",
-                        key=f"mov_ed_{emp['id']}_{periodo}_{ver_valores}")
 
-    tot = ed.drop(columns=["id", "RUT", "Trabajador", "Observación", "Licencia desde", "Licencia hasta"], errors="ignore")
-    st.caption("Totales: " + " · ".join(f"{c}: {C.fmt_clp(tot[c].sum()) if tot[c].sum() >= 100 else f'{tot[c].sum():g}'}"
-                                        for c in tot.columns if tot[c].sum()))
+    st.divider()
 
-    avisos = []
-    for _, r in ed.iterrows():
-        dl = float(r["Días licencia"] or 0)
-        if float(r["Ausencias"] or 0) + dl > 30:
-            avisos.append(f"{r['Trabajador']}: ausencias + días de licencia superan 30.")
-        if dl and (pd.isna(r["Licencia desde"]) or pd.isna(r["Licencia hasta"])):
-            avisos.append(f"{r['Trabajador']}: informe las fechas de la licencia (Previred las exige).")
-    ctx["advertencias"](avisos, "Revisar")
+    # Un expander por trabajador
+    for t in trabs_filtrados:
+        m = movs.get(t["id"]) or {}
+        titulo = f"{_nombre(t)} · RUT {t['rut']}"
+        resumen = _resumen_mov(m)
 
-    b1, b2, b3, b4 = st.columns(4)
-    if not bloqueado and b1.button("💾 Guardar movimientos", type="primary"):
-        for _, r in ed.iterrows():
-            val = {}
-            for k, lab, tipo in COLUMNAS:
-                if lab not in r:
-                    # Columna no visible (ej. "Días trab."): conservar valor anterior
-                    val[k] = float((movs.get(int(r["id"])) or {}).get(k) or 0)
-                    continue
-                v = r[lab]
-                val[k] = (C.a_fecha(v) if not pd.isna(v) else None) if tipo == "fecha" else float(v or 0)
-            if ver_valores:
-                for k, lab in COLUMNAS_VALOR:
-                    val[k] = float(r[lab] or 0)
-            else:  # conservar valores informados antes
-                for k, _ in COLUMNAS_VALOR:
-                    val[k] = float((movs.get(int(r["id"])) or {}).get(k) or 0)
-            val["observacion"] = r["Observación"] or ""
-            extras = {cpt["id"]: float(r[f"{cpt['nombre']} ({cpt['tipo'][:4]}.)"] or 0) for cpt in conceptos}
-            PR.guardar_movimiento(conn, emp["id"], int(r["id"]), periodo, val, extras, u.get("usuario", ""))
-        conn.commit()
-        st.session_state["mov_msg"] = "Movimientos guardados."
-        st.rerun()
-    if estado == "Abierto" and b2.button("📤 Enviar a remuneraciones"):
+        with st.expander(f"{titulo}  —  {resumen}", expanded=False):
+            with st.form(f"mov_form_{t['id']}", clear_on_submit=False):
+                # ───── Bloque 1: Asistencia ─────
+                st.markdown("##### 📅 Asistencia")
+                c1, c2, c3, c4 = st.columns(4)
+                aus = c1.number_input("Ausencias", min_value=0.0, step=0.5, value=float(m.get("ausencias") or 0),
+                                      key=f"aus_{t['id']}")
+                lic = c2.number_input("Días licencia", min_value=0.0, step=0.5, value=float(m.get("licencia") or 0),
+                                      key=f"lic_{t['id']}")
+                lic_desde = c3.date_input("Licencia desde", value=C.a_fecha(m.get("licencia_desde")),
+                                          key=f"licd_{t['id']}")
+                lic_hasta = c4.date_input("Licencia hasta", value=C.a_fecha(m.get("licencia_hasta")),
+                                          key=f"lich_{t['id']}")
+
+                # ───── Bloque 2: Horas extra ─────
+                st.markdown("##### ⏰ Horas extra")
+                c1, c2, c3, c4 = st.columns(4)
+                he50 = c1.number_input("HE 50% (h)", min_value=0.0, step=0.5, value=float(m.get("cant_he_50") or 0),
+                                       key=f"he50_{t['id']}")
+                he100 = c2.number_input("HE 100% (h)", min_value=0.0, step=0.5, value=float(m.get("cant_he_100") or 0),
+                                        key=f"he100_{t['id']}")
+                hd = c3.number_input("Hrs domingo", min_value=0.0, step=0.5, value=float(m.get("cant_hd") or 0),
+                                     key=f"hd_{t['id']}")
+                hed = c4.number_input("HE domingo (h)", min_value=0.0, step=0.5, value=float(m.get("cant_hed") or 0),
+                                      key=f"hed_{t['id']}")
+                if ver_valores:
+                    st.caption("Valores informados (si > 0 se usan; si no, se calculan):")
+                    c1, c2, c3, c4 = st.columns(4)
+                    vhe50 = c1.number_input("$ HE 50%", min_value=0.0, step=1000.0,
+                                            value=float(m.get("valor_he_50") or 0), key=f"vhe50_{t['id']}")
+                    vhe100 = c2.number_input("$ HE 100%", min_value=0.0, step=1000.0,
+                                             value=float(m.get("valor_he_100") or 0), key=f"vhe100_{t['id']}")
+                    vhd = c3.number_input("$ Hrs domingo", min_value=0.0, step=1000.0,
+                                          value=float(m.get("valor_hd") or 0), key=f"vhd_{t['id']}")
+                    vhed = c4.number_input("$ HE domingo", min_value=0.0, step=1000.0,
+                                           value=float(m.get("valor_hed") or 0), key=f"vhed_{t['id']}")
+
+                # ───── Bloque 3: Haberes ─────
+                st.markdown("##### 💰 Haberes (mes completo)")
+                c1, c2, c3 = st.columns(3)
+                col = c1.number_input("Colación (no imponible)", min_value=0.0, step=1000.0,
+                                      value=float(m.get("colacion") or 0), key=f"col_{t['id']}")
+                mov = c2.number_input("Movilización (no imponible)", min_value=0.0, step=1000.0,
+                                      value=float(m.get("movilizacion") or 0), key=f"mov_{t['id']}")
+                vac = c3.number_input("Días vacaciones", min_value=0.0, step=0.5,
+                                      value=float(m.get("dias_vacaciones") or 0), key=f"vac_{t['id']}")
+
+                # ───── Bloque 4: Otros haberes y descuentos ─────
+                st.markdown("##### 🎁 Otros haberes y descuentos")
+                c1, c2, c3 = st.columns(3)
+                ant = c1.number_input("Anticipo", min_value=0.0, step=1000.0,
+                                      value=float(m.get("anticipo") or 0), key=f"ant_{t['id']}")
+                agu = c2.number_input("Aguinaldo", min_value=0.0, step=1000.0,
+                                      value=float(m.get("aguinaldo") or 0), key=f"agu_{t['id']}")
+                bon = c3.number_input("Bono desempeño", min_value=0.0, step=1000.0,
+                                      value=float(m.get("bono_desempeno") or 0), key=f"bon_{t['id']}")
+
+                # ───── Conceptos propios de la empresa ─────
+                extras_vals = {}
+                if conceptos:
+                    st.markdown("##### 🏷️ Conceptos propios de la empresa")
+                    for cpt in conceptos:
+                        v = float((m.get("extras") or {}).get(str(cpt["id"]), 0) or 0)
+                        extras_vals[cpt["id"]] = st.number_input(
+                            f"{cpt['nombre']} ({cpt['tipo']})", min_value=0.0, step=1000.0, value=v,
+                            key=f"cpt_{cpt['id']}_{t['id']}")
+
+                # ───── Observación ─────
+                st.markdown("##### 📝 Observación")
+                obs = st.text_area("Observación (opcional)", value=m.get("observacion") or "",
+                                   key=f"obs_{t['id']}", height=68)
+
+                # ───── Botón guardar (por trabajador) ─────
+                if not bloqueado:
+                    if st.form_submit_button("💾 Guardar movimientos de este trabajador", type="primary"):
+                        val = {
+                            "ausencias": aus, "licencia": lic,
+                            "licencia_desde": C.a_fecha(lic_desde) if lic_desde else None,
+                            "licencia_hasta": C.a_fecha(lic_hasta) if lic_hasta else None,
+                            "cant_he_50": he50, "cant_he_100": he100, "cant_hd": hd, "cant_hed": hed,
+                            "colacion": col, "movilizacion": mov, "dias_vacaciones": vac,
+                            "anticipo": ant, "aguinaldo": agu, "bono_desempeno": bon,
+                            "observacion": obs,
+                        }
+                        if ver_valores:
+                            val.update({"valor_he_50": vhe50, "valor_he_100": vhe100,
+                                        "valor_hd": vhd, "valor_hed": vhed})
+                        else:
+                            for k in ("valor_he_50", "valor_he_100", "valor_hd", "valor_hed"):
+                                val[k] = float((movs.get(t["id"]) or {}).get(k) or 0)
+                        # Días trabajados se calcula internamente en procesos.py; se conserva el valor anterior si existía
+                        val["dias_trabajados"] = float((movs.get(t["id"]) or {}).get("dias_trabajados") or 30.0)
+
+                        PR.guardar_movimiento(conn, emp["id"], t["id"], periodo, val, extras_vals,
+                                              u.get("usuario", ""))
+                        conn.commit()
+                        st.session_state["mov_msg"] = f"Movimientos de {_nombre(t)} guardados."
+                        st.rerun()
+
+    # ───── Botones de estado del período ─────
+    st.divider()
+    b1, b2, b3 = st.columns(3)
+    if estado == "Abierto" and b1.button("📤 Enviar a remuneraciones"):
         PR.guardar_estado_periodo(conn, emp["id"], periodo, "Enviado", u.get("usuario", ""))
         conn.commit()
         st.session_state["mov_msg"] = "Periodo enviado. Remuneraciones ya puede calcular las liquidaciones."
         st.rerun()
-    if puede_rem and estado != "Abierto" and b3.button("🔓 Reabrir periodo"):
+    if puede_rem and estado != "Abierto" and b2.button("🔓 Reabrir periodo"):
         PR.guardar_estado_periodo(conn, emp["id"], periodo, "Abierto", u.get("usuario", ""))
         conn.commit()
         st.rerun()
-    if puede_rem and estado == "Enviado" and b4.button("🔒 Cerrar periodo"):
+    if puede_rem and estado == "Enviado" and b3.button("🔒 Cerrar periodo"):
         PR.guardar_estado_periodo(conn, emp["id"], periodo, "Cerrado", u.get("usuario", ""))
         conn.commit()
         st.rerun()
 
-    # Exportación en el formato de Control RRHH (compatible con carga en otros sistemas)
-    buf = io.BytesIO()
-    exp = ed.drop(columns=["id"]).copy()
-    exp.insert(0, "MES", int(periodo[5:7]))
-    exp.insert(0, "AÑO", int(periodo[:4]))
-    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        pd.DataFrame([[emp["razon_social"]], [emp["rut"]], [f"Movimientos {C.mes_anio_es(periodo)}"]]).to_excel(
-            xw, index=False, header=False, sheet_name="Movimientos")
-        exp.to_excel(xw, index=False, startrow=4, sheet_name="Movimientos")
-    st.download_button("⬇️ Exportar a Excel", buf.getvalue(),
-                       file_name=f"movimientos_{C.rut_partes(emp['rut'])[0]}_{periodo}.xlsx", key="dl_mov")
+    # ───── Exportación a Excel ─────
+    if trabs_filtrados:
+        buf = io.BytesIO()
+        filas_exp = []
+        for t in trabs_filtrados:
+            m = movs.get(t["id"]) or {}
+            r = {"RUT": t["rut"], "Trabajador": _nombre(t)}
+            for k, lab, tipo in COLUMNAS:
+                r[lab] = m.get(k)
+            r["Observación"] = m.get("observacion") or ""
+            filas_exp.append(r)
+        exp = pd.DataFrame(filas_exp)
+        exp.insert(0, "MES", int(periodo[5:7]))
+        exp.insert(0, "AÑO", int(periodo[:4]))
+        with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+            pd.DataFrame([[emp["razon_social"]], [emp["rut"]], [f"Movimientos {C.mes_anio_es(periodo)}"]]).to_excel(
+                xw, index=False, header=False, sheet_name="Movimientos")
+            exp.to_excel(xw, index=False, startrow=4, sheet_name="Movimientos")
+        st.download_button("⬇️ Exportar a Excel", buf.getvalue(),
+                           file_name=f"movimientos_{C.rut_partes(emp['rut'])[0]}_{periodo}.xlsx", key="dl_mov")
 
 
 def pantalla_conceptos(conn, ctx):

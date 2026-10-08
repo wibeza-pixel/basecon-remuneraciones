@@ -542,6 +542,8 @@ def pantalla_trabajadores(conn):
         df = pd.DataFrame(trabs)[["id", "codigo", "rut", "nombres", "apellido_paterno", "apellido_materno", "cargo", "afp", "salud",
                                   "numero_cargas", "tramo_asignacion_familiar", "pensionado", "activo"]]
         st.dataframe(df, width="stretch")
+        st.divider()
+        st.subheader("📁 Documentos del trabajador")        
         seccion_historial(conn, emp, trabs)
 
 
@@ -1455,7 +1457,7 @@ def main():
     pantallas = {"🏠 Dashboard": pantalla_dashboard}
     if "remuneraciones" in mods:
         pantallas["🏢 Empresas"] = pantalla_empresas
-    pantallas["👥 Trabajadores"] = pantalla_trabajadores
+    pantallas["👤 Ficha del Personal"] = pantalla_trabajadores
     if "rrhh" in mods or "remuneraciones" in mods:
         pantallas["🗓 Movimientos del mes"] = lambda c: ui_rrhh.pantalla_movimientos(c, ctx)
         pantallas["🧩 Conceptos adicionales"] = lambda c: ui_rrhh.pantalla_conceptos(c, ctx)
