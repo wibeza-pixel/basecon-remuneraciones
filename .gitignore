@@ -14,3 +14,8 @@ aplicar_fix_prestamos.py
 app_backup_prestamos.py 
 verificar_fix.py 
 *_backup_prestamos_*.py 
+aplicar_*.py 
+fix_*.py 
+app_backup_*.py 
+*_backup_prestamos*.py 
+respaldos_*.py 
