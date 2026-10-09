@@ -28,6 +28,7 @@ from remu import previred as P
 from remu import seguridad as S
 from remu.pdf_indicadores import parse_indicadores_pdf
 from remu.procesos import calcular_periodo
+from remu import procesos as PR
 import ui_rrhh
 
 _favicon = C.BASE_DIR / "favicon.png"
@@ -1050,6 +1051,179 @@ def pantalla_vacaciones(conn):
                                    ORDER BY v.fecha_inicio DESC""", conn, (emp["id"],)), width="stretch")
 
 
+
+
+def pantalla_prestamos(conn):
+    st.header("💰 Préstamos")
+    st.caption("Préstamos internos de la empresa y descuentos CCAF. Se descuentan automáticamente "
+               "en las liquidaciones según el período.")
+    emp = selector_empresa(conn, "prest_emp")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # FORMULARIO NUEVO PRÉSTAMO
+    # ═══════════════════════════════════════════════════════════════
+    trabs = db.rows(conn, "SELECT id, rut, nombres, apellido_paterno FROM trabajadores "
+                          "WHERE empresa_id=? AND activo=1 ORDER BY apellido_paterno, nombres",
+                    (emp["id"],))
+    topts = {f"{t['rut']} — {t['nombres']} {t['apellido_paterno']}": t["id"] for t in trabs}
+    
+    with st.expander("➕ Nuevo préstamo", expanded=False):
+        if not topts:
+            st.warning("No hay trabajadores activos en esta empresa.")
+        else:
+            with st.form("nuevo_prestamo"):
+                tsel = st.selectbox("Trabajador *", list(topts), key="np_trab")
+                c1, c2 = st.columns(2)
+                tipo = c1.selectbox("Tipo de préstamo", ["Empresa", "CCAF"], key="np_tipo")
+                descripcion = c2.text_input("Descripción", placeholder="Ej: Préstamo personal, Crédito dental",
+                                             key="np_desc")
+                
+                c1, c2, c3 = st.columns(3)
+                if tipo == "Empresa":
+                    monto_total = c1.number_input("Monto total *", min_value=0, step=10000,
+                                                   value=0, key="np_monto")
+                    num_cuotas = c2.number_input("Número de cuotas *", min_value=1, max_value=120,
+                                                  value=12, step=1, key="np_cuotas")
+                    cuota_auto = round(monto_total / num_cuotas) if num_cuotas > 0 and monto_total > 0 else 0
+                    cuota_mensual = cuota_auto
+                    c3.metric("Cuota mensual (calculada)", f"${cuota_auto:,.0f}")
+                else:  # CCAF
+                    monto_total = None
+                    cuota_mensual = c1.number_input("Cuota mensual *", min_value=0, step=1000,
+                                                     value=0, key="np_cuota_ccaf")
+                    num_cuotas = c2.number_input("Número de cuotas *", min_value=1, max_value=120,
+                                                  value=12, step=1, key="np_cuotas_ccaf")
+                    c3.caption(f"Total: ${cuota_mensual * num_cuotas:,.0f}")
+                
+                c1, c2 = st.columns(2)
+                anio = c1.number_input("Año de inicio *", min_value=2020, max_value=2100,
+                                        value=date.today().year, step=1, key="np_anio")
+                mes = c2.selectbox("Mes de inicio *",
+                                    list(range(1, 13)),
+                                    index=date.today().month - 1,
+                                    format_func=lambda m: f"{m:02d}",
+                                    key="np_mes")
+                fecha_inicio = f"{anio:04d}-{mes:02d}"
+                
+                st.caption(f"📅 Primera cuota: **{fecha_inicio}** — se generarán {num_cuotas} cuotas automáticamente.")
+                
+                if st.form_submit_button("💾 Crear préstamo", type="primary"):
+                    errores = []
+                    if not descripcion.strip():
+                        errores.append("Falta descripción.")
+                    if tipo == "Empresa" and (not monto_total or monto_total <= 0):
+                        errores.append("Monto total debe ser > 0.")
+                    if not cuota_mensual or cuota_mensual <= 0:
+                        errores.append("Cuota mensual debe ser > 0.")
+                    
+                    if errores:
+                        for e in errores:
+                            st.error(e)
+                    else:
+                        try:
+                            pid = PR.crear_prestamo(
+                                conn, emp["id"], topts[tsel], tipo, descripcion.strip(),
+                                monto_total, cuota_mensual, num_cuotas, fecha_inicio
+                            )
+                            st.success(f"✓ Préstamo creado (id={pid}). {num_cuotas} cuotas generadas desde {fecha_inicio}.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al crear: {e}")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # LISTA DE PRÉSTAMOS
+    # ═══════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("Préstamos registrados")
+    
+    # Filtros
+    c1, c2 = st.columns([2, 3])
+    filtro_estado = c1.selectbox("Filtrar", ["Solo activos", "Todos", "Solo finalizados"], key="prest_filtro")
+    buscar = c2.text_input("🔍 Buscar (RUT o nombre)", key="prest_buscar").strip().upper()
+    
+    prestamos = PR.listar_prestamos(conn, emp["id"], solo_activos=(filtro_estado == "Solo activos"))
+    if filtro_estado == "Solo finalizados":
+        prestamos = [p for p in prestamos if not p.get("activo")]
+    
+    # Filtrar por búsqueda
+    if buscar:
+        prestamos = [p for p in prestamos
+                     if buscar in (p.get("rut") or "").upper()
+                     or buscar in (f"{p.get('nombres', '')} {p.get('apellido_paterno', '')}").upper()]
+    
+    st.caption(f"Mostrando {len(prestamos)} préstamo(s).")
+    
+    if not prestamos:
+        st.info("No hay préstamos con los filtros actuales. Usa **+ Nuevo préstamo** para agregar uno.")
+        return
+    
+    # Tarjetas
+    for p in prestamos:
+        nombre_completo = f"{p.get('nombres', '')} {p.get('apellido_paterno', '')} {p.get('apellido_materno', '')}".strip()
+        tipo = p.get("tipo", "")
+        estado_badge = "✅ Activo" if p.get("activo") else "🔒 Finalizado"
+        cuota_act = int(p.get("cuota_actual") or 1)
+        num_cuotas = int(p.get("num_cuotas") or 0)
+        saldo = p.get("saldo_pendiente")
+        
+        # Resumen para la cabecera
+        resumen = f"Cuota {cuota_act}/{num_cuotas}"
+        if saldo is not None:
+            resumen += f" · Saldo: ${saldo:,.0f}"
+        resumen += f" · {estado_badge}"
+        
+        titulo = f"**{nombre_completo}** · RUT {p.get('rut', '')} · {tipo} — {resumen}"
+        
+        with st.expander(titulo, expanded=False):
+            # Info
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Tipo", tipo)
+            c2.metric("Cuota mensual", f"${float(p.get('cuota_mensual') or 0):,.0f}")
+            c3.metric("Cuota actual", f"{cuota_act} / {num_cuotas}")
+            if saldo is not None:
+                c4.metric("Saldo pendiente", f"${float(saldo):,.0f}")
+            else:
+                c4.metric("Progreso", f"{cuota_act}/{num_cuotas}")
+            
+            if p.get("descripcion"):
+                st.caption(f"📝 {p['descripcion']}")
+            if p.get("fecha_otorgado"):
+                st.caption(f"📅 Otorgado: {p['fecha_otorgado']} · Inicio: {p['fecha_inicio']}")
+            
+            # Cuotas del préstamo
+            st.markdown("##### Cuotas")
+            cuotas = db.rows(conn, """SELECT * FROM prestamos_cuotas 
+                                       WHERE prestamo_id = ? ORDER BY numero_cuota""",
+                             (p["id"],))
+            if cuotas:
+                df_cuotas = pd.DataFrame([{
+                    "#": c["numero_cuota"],
+                    "Período": c["periodo"],
+                    "Monto": f"${float(c['monto']):,.0f}",
+                    "Estado": c["estado"],
+                    "Fecha pago": str(c["fecha_pago"] or ""),
+                } for c in cuotas])
+                st.dataframe(df_cuotas, hide_index=True, use_container_width=True)
+                
+                # Botones de acción sobre cuotas pendientes
+                pendientes = [c for c in cuotas if c["estado"] == "pendiente"]
+                if pendientes:
+                    st.markdown("**Próximas cuotas pendientes:**")
+                    for c in pendientes[:3]:
+                        cc1, cc2, cc3 = st.columns([3, 1, 1])
+                        cc1.write(f"Cuota {c['numero_cuota']}/{num_cuotas} · {c['periodo']} · ${float(c['monto']):,.0f}")
+                        if cc2.button("⏸️ Pausar", key=f"pausa_{c['id']}"):
+                            PR.pausar_cuota(conn, c["id"])
+                            st.success(f"Cuota {c['numero_cuota']} pausada.")
+                            st.rerun()
+                        if cc3.button("✅ Pagada", key=f"pag_{c['id']}"):
+                            PR.marcar_cuota_pagada(conn, c["id"])
+                            st.success(f"Cuota {c['numero_cuota']} marcada como pagada.")
+                            st.rerun()
+            else:
+                st.warning("Sin cuotas generadas (¿préstamo antiguo?).")
+
+
 def pantalla_finiquitos(conn):
     st.header("Finiquitos")
     emp = selector_empresa(conn, "fin_emp")
@@ -1465,7 +1639,8 @@ def main():
         pantallas.update({
             "📄 Contratos": pantalla_contratos, "📊 Indicadores": pantalla_indicadores,
             "💰 Liquidaciones": pantalla_liquidaciones, "📒 Libro de Remuneraciones": pantalla_libro,
-            "🏖 Vacaciones": pantalla_vacaciones, "📝 Finiquitos": pantalla_finiquitos,
+            "🏖️ Vacaciones": pantalla_vacaciones, "💰 Préstamos": pantalla_prestamos,
+            "📑 Finiquitos": pantalla_finiquitos,
             "📤 Archivo Previred": pantalla_previred, "📋 DJ 1887": pantalla_1887})
     pantallas["🧮 Calculadora de sueldo"] = pantalla_calculadora
     pantallas["ℹ️ Ayuda"] = pantalla_ayuda
