@@ -1203,7 +1203,7 @@ def pantalla_prestamos(conn):
                     "Estado": c["estado"],
                     "Fecha pago": str(c["fecha_pago"] or ""),
                 } for c in cuotas])
-                st.dataframe(df_cuotas, hide_index=True, use_container_width=True)
+                st.dataframe(df_cuotas, hide_index=True, width="stretch")
                 
                 # Botones de acción sobre cuotas pendientes
                 pendientes = [c for c in cuotas if c["estado"] == "pendiente"]
