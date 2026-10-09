@@ -142,3 +142,135 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
             avisos[c["tid"]] = calc["advertencias"]
     conn.commit()
     return len(contratos), avisos
+
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PRÉSTAMOS (Empresa / CCAF)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def crear_prestamo(conn, empresa_id, trabajador_id, tipo, descripcion,
+                   monto_total, cuota_mensual, num_cuotas,
+                   fecha_inicio, fecha_otorgado=None, usuario="") -> int:
+    """Crea un préstamo y genera N cuotas automáticamente.
+
+    tipo: "Empresa" o "CCAF"
+    monto_total: monto otorgado (Empresa); puede ser None para CCAF
+    cuota_mensual: monto de cada cuota
+    num_cuotas: cantidad total de cuotas
+    fecha_inicio: período de la primera cuota (ej. "2026-11")
+    """
+    saldo = float(cuota_mensual) * int(num_cuotas) if tipo == "Empresa" else None
+
+    prestamo_id = db.insert(conn, "prestamos", {
+        "empresa_id": empresa_id,
+        "trabajador_id": trabajador_id,
+        "tipo": tipo,
+        "descripcion": descripcion or "",
+        "monto_total": monto_total,
+        "cuota_mensual": cuota_mensual,
+        "num_cuotas": num_cuotas,
+        "cuota_actual": 1,
+        "saldo_pendiente": saldo,
+        "fecha_inicio": fecha_inicio,
+        "fecha_otorgado": fecha_otorgado,
+        "activo": 1,
+    })
+
+    year, month = int(fecha_inicio[:4]), int(fecha_inicio[5:7])
+    for i in range(1, int(num_cuotas) + 1):
+        periodo = f"{year:04d}-{month:02d}"
+        db.insert(conn, "prestamos_cuotas", {
+            "prestamo_id": prestamo_id,
+            "numero_cuota": i,
+            "periodo": periodo,
+            "monto": cuota_mensual,
+            "estado": "pendiente",
+        })
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+
+    conn.commit()
+    return prestamo_id
+
+
+def listar_prestamos(conn, empresa_id, solo_activos=True) -> list:
+    """Lista préstamos con info del trabajador."""
+    sql = """SELECT p.*, t.rut, t.nombres, t.apellido_paterno, t.apellido_materno
+             FROM prestamos p
+             JOIN trabajadores t ON p.trabajador_id = t.id
+             WHERE p.empresa_id = ?"""
+    if solo_activos:
+        sql += " AND p.activo = 1"
+    sql += " ORDER BY p.created_at DESC"
+    return db.rows(conn, sql, (empresa_id,))
+
+
+def cuotas_del_periodo(conn, empresa_id, periodo) -> dict:
+    """Cuotas pendientes del período, agrupadas por trabajador_id."""
+    sql = """SELECT c.*, p.tipo, p.descripcion, p.trabajador_id, p.num_cuotas
+             FROM prestamos_cuotas c
+             JOIN prestamos p ON c.prestamo_id = p.id
+             WHERE p.empresa_id = ? AND c.periodo = ? AND p.activo = 1
+                   AND c.estado = 'pendiente'
+             ORDER BY p.trabajador_id, c.numero_cuota"""
+    cuotas = db.rows(conn, sql, (empresa_id, periodo))
+    out = {}
+    for c in cuotas:
+        out.setdefault(c["trabajador_id"], []).append(c)
+    return out
+
+
+def pausar_cuota(conn, cuota_id) -> None:
+    """Marca una cuota como 'pausada'."""
+    conn.execute("UPDATE prestamos_cuotas SET estado = 'pausada' WHERE id = ?", (cuota_id,))
+    conn.commit()
+
+
+def marcar_cuota_pagada(conn, cuota_id, fecha=None) -> None:
+    """Marca como 'pagada' y actualiza saldo del préstamo."""
+    from datetime import date as _date
+    fecha = fecha or _date.today()
+    cuota = db.row(conn, "SELECT * FROM prestamos_cuotas WHERE id = ?", (cuota_id,))
+    if not cuota:
+        return
+    conn.execute("UPDATE prestamos_cuotas SET estado = 'pagada', fecha_pago = ? WHERE id = ?",
+                 (fecha, cuota_id))
+    prestamo = db.row(conn, "SELECT * FROM prestamos WHERE id = ?", (cuota["prestamo_id"],))
+    if prestamo:
+        nuevo_saldo = None
+        if prestamo.get("saldo_pendiente") is not None:
+            nuevo_saldo = max(0.0, float(prestamo["saldo_pendiente"]) - float(cuota["monto"]))
+        nueva_cuota = int(prestamo["cuota_actual"]) + 1
+        activo = 1 if nueva_cuota <= int(prestamo["num_cuotas"]) else 0
+        conn.execute("""UPDATE prestamos
+                        SET saldo_pendiente = ?, cuota_actual = ?, activo = ?
+                        WHERE id = ?""",
+                     (nuevo_saldo, nueva_cuota, activo, prestamo["id"]))
+    conn.commit()
+
+
+def prestamos_de_trabajador(conn, trabajador_id) -> list:
+    """Todos los préstamos de un trabajador."""
+    return db.rows(conn, """SELECT * FROM prestamos
+                            WHERE trabajador_id = ?
+                            ORDER BY created_at DESC""", (trabajador_id,))
+
+
+def saldo_prestamo(conn, prestamo_id) -> float:
+    """Calcula el saldo pendiente de un préstamo."""
+    p = db.row(conn, "SELECT * FROM prestamos WHERE id = ?", (prestamo_id,))
+    if not p:
+        return 0.0
+    if p.get("saldo_pendiente") is not None:
+        return float(p["saldo_pendiente"])
+    pendientes = db.rows(conn, """SELECT SUM(monto) AS total
+                                   FROM prestamos_cuotas
+                                   WHERE prestamo_id = ? AND estado = 'pendiente'""",
+                         (prestamo_id,))
+    return float(pendientes[0]["total"] or 0) if pendientes else 0.0
