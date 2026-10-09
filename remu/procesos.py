@@ -99,11 +99,13 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
     avisos = {}
 
     # [v5] Cuotas de prestamos del periodo (incluye p.num_cuotas para el detalle)
+    # [v6] 'pagada' tambien se descuenta (el estado es solo referencia visual)
     cuotas_prest = db.rows(conn, """
         SELECT c.*, p.tipo, p.descripcion, p.trabajador_id, p.id AS prestamo_id, p.num_cuotas
         FROM prestamos_cuotas c
         JOIN prestamos p ON c.prestamo_id = p.id
-        WHERE p.empresa_id = ? AND c.periodo = ? AND p.activo = 1 AND c.estado = 'pendiente'
+        WHERE p.empresa_id = ? AND c.periodo = ? AND p.activo = 1
+              AND c.estado IN ('pendiente', 'pagada')
     """, (emp["id"], periodo))
 
     for c in contratos:
@@ -178,11 +180,9 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
             avisos[c["tid"]] = calc["advertencias"]
     conn.commit()
 
-    # [v3] Marcar las cuotas de prestamos como pagadas (ya se descontaron)
-    for cp in cuotas_prest:
-        marcar_cuota_pagada(conn, cp["id"])
-    conn.commit()
-
+    # [v6] NO marcar cuotas como pagadas al recalcular.
+    # El estado 'pagada' es SOLO referencia visual del usuario.
+    # El recalculo siempre descuenta las cuotas del periodo (pendiente o pagada).
     return len(contratos), avisos
 
 
@@ -259,31 +259,106 @@ def cuotas_del_periodo(conn, empresa_id, periodo) -> dict:
 
 
 def pausar_cuota(conn, cuota_id) -> None:
-    """Marca una cuota como 'pausada'."""
+    """Marca una cuota como 'pausada'. (DEPRECADO: usar aplazar_cuota_al_final)"""
     conn.execute("UPDATE prestamos_cuotas SET estado = 'pausada' WHERE id = ?", (cuota_id,))
     conn.commit()
 
 
-def marcar_cuota_pagada(conn, cuota_id, fecha=None) -> None:
-    """Marca como 'pagada' y actualiza saldo del préstamo."""
-    from datetime import date as _date
-    fecha = fecha or _date.today()
+def aplazar_cuota_al_final(conn, cuota_id) -> bool:
+    """
+    Mueve una cuota al final del prestamo, renumerando las siguientes.
+
+    ANTES (24 cuotas, aplazando la 5/24):
+        1/24, 2/24, 3/24, 4/24, 5/24, 6/24, ..., 24/24
+
+    DESPUES:
+        1/24, 2/24, 3/24, 4/24, 5/24(=antes 6), 6/24(=antes 7), ..., 23/24(=antes 24), 24/24(=antes 5)
+
+    - num_cuotas NO cambia
+    - monto_total NO cambia
+    - solo se corre el calendario
+    """
     cuota = db.row(conn, "SELECT * FROM prestamos_cuotas WHERE id = ?", (cuota_id,))
     if not cuota:
-        return
+        return False
+    if cuota["estado"] not in ("pendiente", "pagada"):
+        return False
+
+    prestamo = db.row(conn, "SELECT * FROM prestamos WHERE id = ?", (cuota["prestamo_id"],))
+    if not prestamo:
+        return False
+
+    prestamo_id = prestamo["id"]
+    num_original = int(cuota["numero_cuota"])
+    monto_cuota = float(cuota["monto"])
+
+    # 1) Buscar la ultima cuota del prestamo
+    ultima = db.row(conn, """
+        SELECT * FROM prestamos_cuotas
+        WHERE prestamo_id = ?
+        ORDER BY numero_cuota DESC LIMIT 1
+    """, (prestamo_id,))
+    if not ultima:
+        return False
+
+    num_ultima = int(ultima["numero_cuota"])
+    año_u, mes_u = int(ultima["periodo"][:4]), int(ultima["periodo"][5:7])
+    mes_u += 1
+    if mes_u > 12:
+        mes_u = 1
+        año_u += 1
+    nuevo_periodo = f"{año_u:04d}-{mes_u:02d}"
+
+    # 2) Borrar la cuota original
+    conn.execute("DELETE FROM prestamos_cuotas WHERE id = ?", (cuota_id,))
+
+    # 3) Renumerar las cuotas posteriores (bajan 1 su numero_cuota)
+    conn.execute("""
+        UPDATE prestamos_cuotas
+        SET numero_cuota = numero_cuota - 1
+        WHERE prestamo_id = ? AND numero_cuota > ? AND id != ?
+    """, (prestamo_id, num_original, cuota_id))
+
+    # 4) Correr los periodos de las cuotas posteriores a la aplazada
+    posteriores = db.rows(conn, """
+        SELECT id, periodo FROM prestamos_cuotas
+        WHERE prestamo_id = ? AND numero_cuota >= ?
+        ORDER BY numero_cuota
+    """, (prestamo_id, num_original))
+
+    for p in posteriores:
+        año_p, mes_p = int(p["periodo"][:4]), int(p["periodo"][5:7])
+        mes_p -= 1
+        if mes_p < 1:
+            mes_p = 12
+            año_p -= 1
+        nuevo_p = f"{año_p:04d}-{mes_p:02d}"
+        conn.execute("UPDATE prestamos_cuotas SET periodo = ? WHERE id = ?",
+                     (nuevo_p, p["id"]))
+
+    # 5) Insertar la cuota aplazada al final
+    db.insert(conn, "prestamos_cuotas", {
+        "prestamo_id": prestamo_id,
+        "numero_cuota": num_ultima,
+        "periodo": nuevo_periodo,
+        "monto": monto_cuota,
+        "estado": "pendiente",
+    })
+
+    conn.commit()
+    return True
+
+
+def marcar_cuota_pagada(conn, cuota_id, fecha=None) -> None:
+    """
+    Marca una cuota como 'pagada' (SOLO referencia visual).
+    NO actualiza el saldo del prestamo (eso lo hace el recalculo).
+    La cuota sigue descontandose en la liquidacion del mes correspondiente.
+    """
+    from datetime import date as _date
+    fecha = fecha or _date.today()
     conn.execute("UPDATE prestamos_cuotas SET estado = 'pagada', fecha_pago = ? WHERE id = ?",
                  (fecha, cuota_id))
-    prestamo = db.row(conn, "SELECT * FROM prestamos WHERE id = ?", (cuota["prestamo_id"],))
-    if prestamo:
-        nuevo_saldo = None
-        if prestamo.get("saldo_pendiente") is not None:
-            nuevo_saldo = max(0.0, float(prestamo["saldo_pendiente"]) - float(cuota["monto"]))
-        nueva_cuota = int(prestamo["cuota_actual"]) + 1
-        activo = 1 if nueva_cuota <= int(prestamo["num_cuotas"]) else 0
-        conn.execute("""UPDATE prestamos
-                        SET saldo_pendiente = ?, cuota_actual = ?, activo = ?
-                        WHERE id = ?""",
-                     (nuevo_saldo, nueva_cuota, activo, prestamo["id"]))
     conn.commit()
 
 

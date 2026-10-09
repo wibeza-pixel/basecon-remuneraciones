@@ -1212,13 +1212,16 @@ def pantalla_prestamos(conn):
                     for c in pendientes[:3]:
                         cc1, cc2, cc3 = st.columns([3, 1, 1])
                         cc1.write(f"Cuota {c['numero_cuota']}/{num_cuotas} · {c['periodo']} · ${float(c['monto']):,.0f}")
-                        if cc2.button("⏸️ Pausar", key=f"pausa_{c['id']}"):
-                            PR.pausar_cuota(conn, c["id"])
-                            st.success(f"Cuota {c['numero_cuota']} pausada.")
+                        if cc2.button("⏩ Aplazar al final", key=f"apl_{c['id']}"):
+                            ok = PR.aplazar_cuota_al_final(conn, c["id"])
+                            if ok:
+                                st.success(f"Cuota {c['numero_cuota']} aplazada al final.")
+                            else:
+                                st.warning("No se pudo aplazar.")
                             st.rerun()
-                        if cc3.button("✅ Pagada", key=f"pag_{c['id']}"):
+                        if cc3.button("✅ Marcar pagada", key=f"pag_{c['id']}"):
                             PR.marcar_cuota_pagada(conn, c["id"])
-                            st.success(f"Cuota {c['numero_cuota']} marcada como pagada.")
+                            st.success(f"Cuota {c['numero_cuota']} marcada como pagada (solo referencia).")
                             st.rerun()
             else:
                 st.warning("Sin cuotas generadas (¿préstamo antiguo?).")
