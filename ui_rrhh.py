@@ -63,7 +63,10 @@ def pantalla_movimientos(conn, ctx):
     st.caption("Asistencia, licencias, horas extra, anticipos, bonos y otros movimientos. "
                "Remuneraciones los toma automáticamente al calcular las liquidaciones. "
                "Los días trabajados se calculan como 30 menos ausencias y días de licencia al generar la liquidación.")
-    emp = ctx["selector_empresa"](conn, "mov_emp")
+    emp = ctx["empresa_activa"](conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     periodo = ctx["input_periodo"](key="mov_per")
     u = ctx["usuario"]()
     puede_rem = "remuneraciones" in ctx["modulos"]()
@@ -262,7 +265,10 @@ def pantalla_conceptos(conn, ctx):
     st.header("Conceptos adicionales")
     st.caption("Bonos, asignaciones o descuentos propios de cada empresa. Aparecen como columnas en Movimientos del mes. "
                "El tipo define si es imponible, no imponible o descuento; el código LRE, dónde se informa a la DT.")
-    emp = ctx["selector_empresa"](conn, "cpt_emp")
+    emp = ctx["empresa_activa"](conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     cps = PR.conceptos_empresa(conn, emp["id"], solo_activos=False)
     todos_codigos = {c: f"{c} — {n}" for t in C.CODIGOS_LRE_CONCEPTO.values() for c, n in t.items()}
     df = pd.DataFrame([{"id": c["id"], "Nombre": c["nombre"], "Tipo": c.get("tipo") or "Haber imponible",

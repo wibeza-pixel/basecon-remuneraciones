@@ -776,7 +776,10 @@ def _form_trabajador(prefix, t=None):
 
 def pantalla_trabajadores(conn):
     st.header("Trabajadores")
-    emp = selector_empresa(conn, "trab_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     with st.expander("➕ Nuevo trabajador"):
         with st.form("nuevo_trabajador"):
             d = _form_trabajador("nt")
@@ -909,7 +912,10 @@ def seccion_historial(conn, emp, trabs):
 
 def pantalla_contratos(conn):
     st.header("Contratos de trabajo")
-    emp = selector_empresa(conn, "cont_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     trabs = db.rows(conn, "SELECT id, rut, nombres, apellido_paterno FROM trabajadores WHERE empresa_id=? AND activo=1",
                     (emp["id"],))
     topts = {f"{t['rut']} - {t['nombres']} {t['apellido_paterno']}": t["id"] for t in trabs}
@@ -1168,7 +1174,10 @@ No aplica a pensionados ni a trabajadores de 65 años o más.""")
 
 def pantalla_liquidaciones(conn):
     st.header("Liquidaciones de sueldo")
-    emp = selector_empresa(conn, "liq_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     periodo = input_periodo(key="liq_per")
     ind = db.get_indicadores(periodo, conn)
     if not ind:
@@ -1267,7 +1276,10 @@ def pantalla_liquidaciones(conn):
 
 def pantalla_libro(conn):
     st.header("Libro de remuneraciones")
-    emp = selector_empresa(conn, "libro_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     periodo = input_periodo(key="libro_per")
     c1, c2 = st.columns(2)
     if c1.button("Generar libro Excel + centralización"):
@@ -1293,7 +1305,10 @@ def pantalla_libro(conn):
 
 def pantalla_vacaciones(conn):
     st.header("Vacaciones y comprobante de feriado")
-    emp = selector_empresa(conn, "vac_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     trabs = db.rows(conn, "SELECT id, rut, nombres, apellido_paterno FROM trabajadores WHERE empresa_id=? AND activo=1",
                     (emp["id"],))
     topts = {f"{t['rut']} - {t['nombres']} {t['apellido_paterno']}": t["id"] for t in trabs}
@@ -1338,7 +1353,10 @@ def pantalla_prestamos(conn):
     st.header("💰 Préstamos")
     st.caption("Préstamos internos de la empresa y descuentos CCAF. Se descuentan automáticamente "
                "en las liquidaciones según el período.")
-    emp = selector_empresa(conn, "prest_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     
     # ═══════════════════════════════════════════════════════════════
     # FORMULARIO NUEVO PRÉSTAMO
@@ -1510,7 +1528,10 @@ def pantalla_prestamos(conn):
 
 def pantalla_finiquitos(conn):
     st.header("Finiquitos")
-    emp = selector_empresa(conn, "fin_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     conts = db.rows(conn, """SELECT c.*, t.rut, t.nombres, t.apellido_paterno FROM contratos c
                              JOIN trabajadores t ON c.trabajador_id=t.id WHERE c.empresa_id=? AND c.activo=1""", (emp["id"],))
     copts = {f"{c['rut']} - {c['nombres']} {c['apellido_paterno']} ({c['cargo']})": c for c in conts}
@@ -1609,7 +1630,10 @@ def pantalla_previred(conn):
     st.header("Archivo Previred")
     st.markdown("Formato **largo variable por separador** (105 campos, `;`), versión 82 del instructivo Previred. "
                 "Valide el archivo con el validador de Previred antes de la primera carga.")
-    emp = selector_empresa(conn, "prev_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     periodo = input_periodo(key="prev_per")
     if st.button("Generar archivo Previred"):
         ruta = EXPORTS_DIR / f"previred_{C.rut_partes(emp['rut'])[0]}_{periodo.replace('-', '')}.txt"
@@ -1623,7 +1647,10 @@ def pantalla_previred(conn):
 
 def pantalla_1887(conn):
     st.header("Declaración Jurada 1887 y certificados")
-    emp = selector_empresa(conn, "dj_emp")
+    emp = empresa_activa(conn)
+    if not emp:
+        st.warning("Seleccione una empresa en el menu lateral.")
+        return
     at = int(st.number_input("Año tributario", 2020, 2035, date.today().year))
     ar = at - 1
     st.subheader(f"Factores de actualización (rentas {ar})")
@@ -1925,7 +1952,7 @@ def main():
         st.session_state["_periodo_persistido"] = periodo_activo()
 
     mods = modulos()
-    ctx = {"selector_empresa": selector_empresa, "input_periodo": input_periodo, "usuario": usuario_actual,
+    ctx = {"selector_empresa": selector_empresa, "empresa_activa": empresa_activa, "input_periodo": input_periodo, "usuario": usuario_actual,
            "modulos": modulos, "advertencias": mostrar_advertencias}
     pantallas = {"🏠 Dashboard": pantalla_dashboard}
     if "remuneraciones" in mods:
