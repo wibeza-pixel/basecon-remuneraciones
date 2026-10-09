@@ -109,65 +109,91 @@ section[data-testid="stSidebar"] button p {
     background: linear-gradient(135deg, #e8eef7 0%, #f5f7fb 50%, #e0e8f5 100%);
     z-index: -1;
 }
-.login-card {
-    max-width: 420px; margin: 2rem auto 2rem auto;
-    background: #ffffff;
-    border-radius: 16px;
-    box-shadow: 0 12px 40px rgba(11, 31, 58, 0.12), 0 2px 8px rgba(11, 31, 58, 0.06);
-    padding: 2.2rem 2.2rem 1.5rem 2.2rem;
-    border: 1px solid rgba(11, 31, 58, 0.06);
+/* Sidebar logo en login */
+.login-sidebar-logo {
+    padding: 1rem 1rem 0.5rem 1rem;
+    text-align: center;
 }
-.login-logo {
-    display: block; margin: 0 auto 1rem auto;
-    max-width: 180px; height: auto;
+.login-sidebar-logo img {
+    max-width: 120px; height: auto;
+    margin: 0 auto; display: block;
+}
+.login-sidebar-brand {
+    text-align: center;
+    font-size: 1.15rem; font-weight: 800;
+    color: #0b1f3a; letter-spacing: 0.02em;
+    margin: 0.3rem 0 1rem 0;
+}
+/* Tarjeta grande centrada */
+.login-card {
+    max-width: 520px; margin: 3rem auto 2rem auto;
+    background: #ffffff;
+    border-radius: 18px;
+    box-shadow: 0 16px 48px rgba(11, 31, 58, 0.14), 0 4px 12px rgba(11, 31, 58, 0.08);
+    padding: 3rem 3rem 2rem 3rem;
+    border: 1px solid rgba(11, 31, 58, 0.06);
 }
 .login-title {
     text-align: center;
-    font-size: 1.85rem; font-weight: 800;
+    font-size: 2.2rem; font-weight: 800;
     color: #0b1f3a; letter-spacing: -0.02em;
-    margin: 0.5rem 0 0.25rem 0;
+    margin: 0 0 0.35rem 0;
 }
 .login-subtitle {
     text-align: center;
-    font-size: 1rem; font-weight: 500;
+    font-size: 1.1rem; font-weight: 500;
     color: #5a6b85; letter-spacing: 0.02em;
-    margin: 0 0 1.75rem 0;
+    margin: 0 0 2rem 0;
 }
 .login-footer {
-    text-align: center; font-size: 0.85rem;
+    text-align: center; font-size: 0.88rem;
     color: #8b98ac; margin-top: 2rem;
 }
 .login-soporte {
-    text-align: center; font-size: 0.88rem;
-    color: #5a6b85; line-height: 1.6;
-    margin-top: 1.5rem; padding-top: 1.5rem;
+    text-align: center; font-size: 0.95rem;
+    color: #5a6b85; line-height: 1.7;
+    margin-top: 2rem; padding-top: 1.5rem;
     border-top: 1px solid #eaeff5;
 }
 .login-soporte a { color: #0b1f3a; text-decoration: none; font-weight: 600; }
 .login-soporte a:hover { color: #f2a900; }
+/* Boton ENTRAR con letra blanca */
 [data-testid="stForm"] button[kind="primary"],
-[data-testid="stForm"] button[kind="primaryFormSubmit"] {
+[data-testid="stForm"] button[kind="primaryFormSubmit"],
+[data-testid="stForm"] button[type="submit"] {
     background: linear-gradient(135deg, #0b1f3a 0%, #1a3a63 100%) !important;
-    color: #ffffff !important;
     border: none !important;
-    font-size: 1.05rem !important;
+    font-size: 1.15rem !important;
     font-weight: 700 !important;
-    letter-spacing: 0.03em !important;
-    padding: 0.7rem 1rem !important;
+    letter-spacing: 0.05em !important;
+    padding: 0.85rem 1rem !important;
     border-radius: 10px !important;
     transition: all 0.2s ease !important;
-    box-shadow: 0 4px 12px rgba(11, 31, 58, 0.2) !important;
+    box-shadow: 0 4px 14px rgba(11, 31, 58, 0.25) !important;
+}
+[data-testid="stForm"] button[kind="primary"] p,
+[data-testid="stForm"] button[kind="primaryFormSubmit"] p,
+[data-testid="stForm"] button[kind="primary"] div,
+[data-testid="stForm"] button[kind="primaryFormSubmit"] div,
+[data-testid="stForm"] button[type="submit"] p,
+[data-testid="stForm"] button[type="submit"] div {
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    font-size: 1.15rem !important;
+    letter-spacing: 0.05em !important;
 }
 [data-testid="stForm"] button[kind="primary"]:hover,
-[data-testid="stForm"] button[kind="primaryFormSubmit"]:hover {
+[data-testid="stForm"] button[kind="primaryFormSubmit"]:hover,
+[data-testid="stForm"] button[type="submit"]:hover {
     background: linear-gradient(135deg, #1a3a63 0%, #0b1f3a 100%) !important;
-    box-shadow: 0 6px 16px rgba(11, 31, 58, 0.3) !important;
+    box-shadow: 0 6px 18px rgba(11, 31, 58, 0.35) !important;
     transform: translateY(-1px);
 }
+/* Inputs */
 [data-testid="stForm"] input {
     border-radius: 8px !important;
     border: 1.5px solid #d0dae8 !important;
-    padding: 0.6rem 0.8rem !important;
+    padding: 0.7rem 0.85rem !important;
     font-size: 1rem !important;
     transition: all 0.2s ease !important;
 }
@@ -575,16 +601,19 @@ def pantalla_configuracion_inicial():
 
 
 def pantalla_login():
-    # Fondo con gradiente
+    # Fondo con gradiente (overlay)
     st.markdown('<div class="login-bg"></div>', unsafe_allow_html=True)
 
-    # Tarjeta de login centrada
-    col = st.columns([1, 1.4, 1])[1]
+    # ─── Logo en el sidebar (arriba izquierda) ───
+    if LOGO.exists():
+        st.sidebar.markdown(
+            f'<div class="login-sidebar-logo"><img src="data:image/png;base64,{_logo_b64()}"></div>'
+            '<div class="login-sidebar-brand">BASECON</div>',
+            unsafe_allow_html=True)
+
+    # ─── Tarjeta de login centrada y mas grande ───
+    col = st.columns([1, 2, 1])[1]
     with col:
-        # Header con logo y título
-        if LOGO.exists():
-            st.markdown(f'<img src="data:image/png;base64,{_logo_b64()}" class="login-logo">',
-                        unsafe_allow_html=True)
         st.markdown('<div class="login-title">BASECON</div>', unsafe_allow_html=True)
         st.markdown('<div class="login-subtitle">Sistema de Remuneraciones Chile</div>',
                     unsafe_allow_html=True)
