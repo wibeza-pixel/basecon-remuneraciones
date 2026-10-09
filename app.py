@@ -100,6 +100,137 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
 section[data-testid="stSidebar"] button p {
     font-size: 1.05rem !important;
 }
+
+/* ══════════════════════════════════════════════════════ */
+/* LOGIN                                                   */
+/* ══════════════════════════════════════════════════════ */
+.login-bg {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: linear-gradient(135deg, #e8eef7 0%, #f5f7fb 50%, #e0e8f5 100%);
+    z-index: -1;
+}
+.login-card {
+    max-width: 420px; margin: 2rem auto 2rem auto;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(11, 31, 58, 0.12), 0 2px 8px rgba(11, 31, 58, 0.06);
+    padding: 2.2rem 2.2rem 1.5rem 2.2rem;
+    border: 1px solid rgba(11, 31, 58, 0.06);
+}
+.login-logo {
+    display: block; margin: 0 auto 1rem auto;
+    max-width: 180px; height: auto;
+}
+.login-title {
+    text-align: center;
+    font-size: 1.85rem; font-weight: 800;
+    color: #0b1f3a; letter-spacing: -0.02em;
+    margin: 0.5rem 0 0.25rem 0;
+}
+.login-subtitle {
+    text-align: center;
+    font-size: 1rem; font-weight: 500;
+    color: #5a6b85; letter-spacing: 0.02em;
+    margin: 0 0 1.75rem 0;
+}
+.login-footer {
+    text-align: center; font-size: 0.85rem;
+    color: #8b98ac; margin-top: 2rem;
+}
+.login-soporte {
+    text-align: center; font-size: 0.88rem;
+    color: #5a6b85; line-height: 1.6;
+    margin-top: 1.5rem; padding-top: 1.5rem;
+    border-top: 1px solid #eaeff5;
+}
+.login-soporte a { color: #0b1f3a; text-decoration: none; font-weight: 600; }
+.login-soporte a:hover { color: #f2a900; }
+[data-testid="stForm"] button[kind="primary"],
+[data-testid="stForm"] button[kind="primaryFormSubmit"] {
+    background: linear-gradient(135deg, #0b1f3a 0%, #1a3a63 100%) !important;
+    color: #ffffff !important;
+    border: none !important;
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.03em !important;
+    padding: 0.7rem 1rem !important;
+    border-radius: 10px !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 4px 12px rgba(11, 31, 58, 0.2) !important;
+}
+[data-testid="stForm"] button[kind="primary"]:hover,
+[data-testid="stForm"] button[kind="primaryFormSubmit"]:hover {
+    background: linear-gradient(135deg, #1a3a63 0%, #0b1f3a 100%) !important;
+    box-shadow: 0 6px 16px rgba(11, 31, 58, 0.3) !important;
+    transform: translateY(-1px);
+}
+[data-testid="stForm"] input {
+    border-radius: 8px !important;
+    border: 1.5px solid #d0dae8 !important;
+    padding: 0.6rem 0.8rem !important;
+    font-size: 1rem !important;
+    transition: all 0.2s ease !important;
+}
+[data-testid="stForm"] input:focus {
+    border-color: #0b1f3a !important;
+    box-shadow: 0 0 0 3px rgba(11, 31, 58, 0.1) !important;
+}
+
+
+/* SIDEBAR - tarjetas destacadas */
+.sidebar-user-card {
+    background: #f4f6fa;
+    border-radius: 10px;
+    padding: 0.7rem 0.9rem;
+    margin: 0.3rem 0 0.6rem 0;
+    border: 1px solid #e3e8f0;
+}
+.sidebar-user-card .u-name {
+    font-size: 1rem; font-weight: 700; color: #0b1f3a;
+    line-height: 1.2;
+}
+.sidebar-user-card .u-role {
+    font-size: 0.8rem; color: #5a6b85; margin-top: 0.15rem;
+    text-transform: uppercase; letter-spacing: 0.06em;
+}
+.sidebar-active-card {
+    background: linear-gradient(135deg, #0b1f3a 0%, #1a3a63 100%);
+    border-radius: 10px;
+    padding: 0.55rem 0.85rem 0.35rem 0.85rem;
+    margin: 0.35rem 0;
+    box-shadow: 0 3px 8px rgba(11, 31, 58, 0.18);
+}
+.sidebar-active-card .card-et {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em;
+    color: #f2a900; text-transform: uppercase;
+    display: block; margin-bottom: 0.1rem;
+}
+.sidebar-active-card .card-val {
+    font-size: 1.05rem; font-weight: 700; color: #ffffff;
+    line-height: 1.25; word-break: break-word;
+}
+.sidebar-active-card [data-testid="stSelectbox"] label { display: none !important; }
+.sidebar-active-card [data-testid="stSelectbox"] > div > div {
+    background: rgba(255, 255, 255, 0.12) !important;
+    border: 1px solid rgba(255, 255, 255, 0.25) !important;
+    border-radius: 6px !important;
+    color: #ffffff !important;
+    min-height: 1.9rem !important;
+}
+.sidebar-active-card [data-testid="stSelectbox"] > div > div:hover {
+    background: rgba(255, 255, 255, 0.2) !important;
+}
+.sidebar-active-card [data-testid="stSelectbox"] input,
+.sidebar-active-card [data-testid="stSelectbox"] div[role="button"] {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+}
+section[data-testid="stSidebar"] hr {
+    margin: 0.6rem 0;
+    border-color: #e3e8f0;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -301,6 +432,125 @@ def mostrar_advertencias(adv, titulo=None):
 # ============================================================
 # Acceso
 # ============================================================
+
+
+def empresa_activa(conn):
+    """Devuelve la empresa activa del session_state (o la primera disponible)."""
+    emps = empresas_visibles(conn)
+    if not emps:
+        return None
+    eid = st.session_state.get("empresa_activa_id")
+    if eid and any(e["id"] == eid for e in emps):
+        return next(e for e in emps if e["id"] == eid)
+    u = usuario_actual()
+    ultima = u.get("ultima_empresa_id")
+    if ultima and any(e["id"] == ultima for e in emps):
+        st.session_state["empresa_activa_id"] = ultima
+        return next(e for e in emps if e["id"] == ultima)
+    st.session_state["empresa_activa_id"] = emps[0]["id"]
+    return emps[0]
+
+
+def _guardar_preferencia_usuario(empresa_id=None, periodo=None):
+    """Guarda ultima_empresa_id y/o ultimo_periodo en la DB del usuario actual."""
+    u = usuario_actual()
+    uid = u.get("id")
+    if not uid:
+        return
+    try:
+        conn = db.get_conn()
+        try:
+            if empresa_id is not None:
+                conn.execute("UPDATE usuarios SET ultima_empresa_id=? WHERE id=?",
+                             (empresa_id, uid))
+            if periodo is not None:
+                conn.execute("UPDATE usuarios SET ultimo_periodo=? WHERE id=?",
+                             (periodo, uid))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print("[warn] No se pudo guardar preferencia: " + str(e))
+
+
+def _sidebar_header(conn):
+    """Renderiza las 3 tarjetas destacadas en el sidebar."""
+    u = usuario_actual()
+    emps = empresas_visibles(conn)
+
+    st.sidebar.markdown(
+        '<div class="sidebar-user-card">'
+        '<div class="u-name">' + (u.get("nombre") or u.get("usuario") or "Usuario") + '</div>'
+        '<div class="u-role">' + (u.get("rol") or "usuario") + '</div>'
+        '</div>',
+        unsafe_allow_html=True)
+
+    st.sidebar.markdown('<div class="sidebar-active-card">'
+                        '<span class="card-et">Empresa activa</span>',
+                        unsafe_allow_html=True)
+    if not emps:
+        st.sidebar.markdown('<div class="card-val">Sin empresa asignada</div></div>',
+                            unsafe_allow_html=True)
+    elif len(emps) == 1:
+        st.sidebar.markdown('<div class="card-val">' + emps[0]["razon_social"] + '</div></div>',
+                            unsafe_allow_html=True)
+        st.session_state["empresa_activa_id"] = emps[0]["id"]
+    else:
+        opciones = {}
+        for e in emps:
+            opciones[e["razon_social"]] = e["id"]
+        eid_actual = st.session_state.get("empresa_activa_id") or emps[0]["id"]
+        idx = 0
+        for i, e in enumerate(emps):
+            if e["id"] == eid_actual:
+                idx = i
+                break
+
+        def _on_empresa_change():
+            nueva_id = opciones[st.session_state["_sel_empresa_activa"]]
+            st.session_state["empresa_activa_id"] = nueva_id
+            _guardar_preferencia_usuario(empresa_id=nueva_id)
+
+        sel = st.sidebar.selectbox("Empresa activa", list(opciones), index=idx,
+                                    key="_sel_empresa_activa", label_visibility="collapsed",
+                                    on_change=_on_empresa_change)
+        st.sidebar.markdown('</div>', unsafe_allow_html=True)
+        st.session_state["empresa_activa_id"] = opciones[sel]
+
+    st.sidebar.markdown('<div class="sidebar-active-card">'
+                        '<span class="card-et">Mes activo</span>',
+                        unsafe_allow_html=True)
+    _render_selector_mes()
+    st.sidebar.markdown('</div>', unsafe_allow_html=True)
+
+
+def _render_selector_mes():
+    """Selector de mes activo (version interna para la tarjeta)."""
+    act = periodo_activo()
+    hoy = date.today()
+    a, m = hoy.year, hoy.month + 1
+    if m == 13:
+        a, m = a + 1, 1
+    opciones = []
+    for _ in range(26):
+        opciones.append(f"{a}-{m:02d}")
+        m -= 1
+        if m == 0:
+            a, m = a - 1, 12
+    if act not in opciones:
+        opciones.insert(0, act)
+
+    def _on_mes_change():
+        nuevo = st.session_state["_sel_mes_activo_tarjeta"]
+        st.session_state["periodo_activo"] = nuevo
+        _guardar_preferencia_usuario(periodo=nuevo)
+
+    st.session_state["_sel_mes_activo_tarjeta"] = act
+    st.sidebar.selectbox("Mes activo", opciones, key="_sel_mes_activo_tarjeta",
+                         format_func=nombre_mes, label_visibility="collapsed",
+                         on_change=_on_mes_change)
+
+
 def pantalla_configuracion_inicial():
     st.title("BASECON — Configuración inicial")
     st.info("No hay usuarios creados. Defina el usuario administrador (dueño del sistema). "
@@ -325,19 +575,32 @@ def pantalla_configuracion_inicial():
 
 
 def pantalla_login():
-    col = st.columns([1, 2, 1])[1]
+    # Fondo con gradiente
+    st.markdown('<div class="login-bg"></div>', unsafe_allow_html=True)
+
+    # Tarjeta de login centrada
+    col = st.columns([1, 1.4, 1])[1]
     with col:
+        # Header con logo y título
         if LOGO.exists():
-            st.image(str(LOGO), width="stretch")
-        st.markdown("### 🔒 BASECON — Remuneraciones")
+            st.markdown(f'<img src="data:image/png;base64,{_logo_b64()}" class="login-logo">',
+                        unsafe_allow_html=True)
+        st.markdown('<div class="login-title">BASECON</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-subtitle">Sistema de Remuneraciones Chile</div>',
+                    unsafe_allow_html=True)
+
+        # Bloqueo por intentos
         bloqueo = st.session_state.get("bloqueo_hasta", 0)
         if time.time() < bloqueo:
             st.error(f"Demasiados intentos fallidos. Espere {int(bloqueo - time.time())} segundos.")
             st.stop()
+
+        # Formulario
         with st.form("login"):
-            u = st.text_input("Usuario")
-            c = st.text_input("Clave", type="password")
-            ok = st.form_submit_button("Entrar", type="primary", width="stretch")
+            u = st.text_input("Usuario", placeholder="Ingrese su usuario")
+            c = st.text_input("Clave", type="password", placeholder="Ingrese su clave")
+            ok = st.form_submit_button("ENTRAR", type="primary", width="stretch")
+
         if ok:
             user, motivo = S.autenticar(u, c)
             if user:
@@ -351,10 +614,28 @@ def pantalla_login():
                     st.session_state["bloqueo_hasta"] = time.time() + 30
                     st.session_state["intentos"] = 0
                 st.error(motivo)
+
+        # Info de soporte
         ct = texto_contacto(leer_contacto())
         if ct:
-            st.markdown("**¿Necesita ayuda o una cuenta de prueba?**  \n" + ct)
+            st.markdown('<div class="login-soporte"><strong>¿Necesita ayuda o una cuenta de prueba?</strong><br>' + ct + '</div>',
+                        unsafe_allow_html=True)
+
+        # Footer
+        st.markdown('<div class="login-footer">Basecon © 2026 — Todos los derechos reservados</div>',
+                    unsafe_allow_html=True)
     st.stop()
+
+
+def _logo_b64() -> str:
+    """Devuelve el logo en base64 para incrustarlo en el HTML del login."""
+    import base64
+    if not LOGO.exists():
+        return ""
+    with open(LOGO, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+
 
 
 # ============================================================
@@ -1623,10 +1904,25 @@ def main():
             f"Acceso: quedan {max(0, u['dias_restantes'])} día(s)")
     if LOGO.exists():
         st.sidebar.image(str(LOGO), width="stretch")
-    st.sidebar.markdown(f"**{u.get('nombre') or u.get('usuario')}** · {u.get('rol')}  \n"
-                        + " · ".join(C.MODULOS[m] for m in sorted(modulos())))
 
-    selector_mes_activo()
+    # FASE 1: inicializar empresa y periodo desde DB del usuario
+    if "empresa_activa_id" not in st.session_state and u.get("ultima_empresa_id"):
+        st.session_state["empresa_activa_id"] = u["ultima_empresa_id"]
+    if "periodo_activo" not in st.session_state and u.get("ultimo_periodo"):
+        if periodo_valido(u["ultimo_periodo"]):
+            st.session_state["periodo_activo"] = u["ultimo_periodo"]
+
+    # Renderizar tarjetas destacadas (usuario, empresa activa, mes activo)
+    _conn_header = db.get_conn()
+    try:
+        _sidebar_header(_conn_header)
+    finally:
+        _conn_header.close()
+
+    # Persistir periodo si cambio
+    if st.session_state.get("_periodo_persistido") != periodo_activo():
+        _guardar_preferencia_usuario(periodo=periodo_activo())
+        st.session_state["_periodo_persistido"] = periodo_activo()
 
     mods = modulos()
     ctx = {"selector_empresa": selector_empresa, "input_periodo": input_periodo, "usuario": usuario_actual,
