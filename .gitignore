@@ -19,3 +19,4 @@ fix_*.py
 app_backup_*.py 
 *_backup_prestamos*.py 
 respaldos_*.py 
+*_backup_*.py 
