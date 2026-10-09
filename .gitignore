@@ -4,3 +4,13 @@ exports/
 __pycache__/
 .pytest_cache/
 test_prestamos.py
+respaldos_supabase/ 
+respaldos_20261008_tarde/ 
+*_backup_prestamos.py 
+*_backup_08oct.py 
+procesos_actual.txt 
+backup_supabase.py 
+aplicar_fix_prestamos.py 
+app_backup_prestamos.py 
+verificar_fix.py 
+*_backup_prestamos_*.py 
