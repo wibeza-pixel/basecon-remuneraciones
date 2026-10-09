@@ -257,6 +257,85 @@ section[data-testid="stSidebar"] hr {
     border-color: #e3e8f0;
 }
 
+
+/* ══════════════════════════════════════════════════ */
+/* MENU LATERAL — Acordeon con pill style             */
+/* ══════════════════════════════════════════════════ */
+/* Expander del grupo (el titulo clickeable) */
+section[data-testid="stSidebar"] details {
+    border: none !important;
+    margin-bottom: 0.2rem !important;
+}
+section[data-testid="stSidebar"] details > summary {
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    color: #0b1f3a !important;
+    padding: 0.55rem 0.6rem !important;
+    border-radius: 8px !important;
+    list-style: none !important;
+    cursor: pointer !important;
+    transition: background 0.15s ease !important;
+    background: transparent !important;
+}
+section[data-testid="stSidebar"] details > summary:hover {
+    background: rgba(11, 31, 58, 0.06) !important;
+}
+section[data-testid="stSidebar"] details[open] > summary {
+    background: rgba(11, 31, 58, 0.04) !important;
+}
+/* Ocultar la flecha nativa del expander */
+section[data-testid="stSidebar"] details > summary::-webkit-details-marker {
+    display: none !important;
+}
+section[data-testid="stSidebar"] details > summary::marker {
+    content: "" !important;
+}
+/* Contenedor interno del expander */
+section[data-testid="stSidebar"] details > div {
+    padding: 0.2rem 0 0.3rem 0.4rem !important;
+    border-left: 2px solid rgba(11, 31, 58, 0.08) !important;
+    margin-left: 0.5rem !important;
+}
+/* Botones dentro del expander (pill style) */
+section[data-testid="stSidebar"] details button {
+    width: 100% !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0.45rem 0.7rem !important;
+    margin: 0.05rem 0 !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    font-size: 0.98rem !important;
+    font-weight: 500 !important;
+    color: #1a1a1a !important;
+    transition: all 0.12s ease !important;
+}
+section[data-testid="stSidebar"] details button:hover {
+    background: rgba(11, 31, 58, 0.08) !important;
+    color: #0b1f3a !important;
+}
+section[data-testid="stSidebar"] details button p {
+    font-size: 0.98rem !important;
+    font-weight: 500 !important;
+    color: inherit !important;
+    text-align: left !important;
+    margin: 0 !important;
+}
+/* Item activo (marcado con st.markdown) */
+.menu-item-activo {
+    display: block;
+    padding: 0.5rem 0.75rem !important;
+    margin: 0.05rem 0 !important;
+    border-radius: 8px !important;
+    background: linear-gradient(135deg, #0b1f3a 0%, #1a3a63 100%) !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    font-size: 0.98rem !important;
+    box-shadow: 0 2px 6px rgba(11, 31, 58, 0.2) !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2001,10 +2080,48 @@ def main():
     pantallas["ℹ️ Ayuda"] = pantalla_ayuda
     if es_admin():
         pantallas["🔐 Usuarios"] = pantalla_usuarios
-    menu = st.sidebar.radio("Menú", list(pantallas))
-    if st.sidebar.button("Cerrar sesión"):
+    # ─── Menu acordeon por grupos ───
+    GRUPOS = [
+        ("🏠 Principal",       ["🏠 Dashboard"]),
+        ("👥 RRHH",            ["👤 Ficha del Personal", "🗓 Movimientos del mes",
+                                "🧩 Conceptos adicionales", "🏖️ Vacaciones"]),
+        ("💰 Remuneraciones",  ["📄 Contratos", "📊 Indicadores", "💰 Liquidaciones",
+                                "📒 Libro de Remuneraciones", "💰 Préstamos", "📑 Finiquitos"]),
+        ("🧾 Impuestos",       ["📤 Archivo Previred", "📋 DJ 1887"]),
+        ("⚙️ Herramientas",    ["🧮 Calculadora de sueldo", "ℹ️ Ayuda"]),
+        ("🔐 Administración",  ["🏢 Empresas", "🔐 Usuarios"]),
+    ]
+
+    # Inicializar pantalla actual
+    if "pantalla_actual" not in st.session_state:
+        st.session_state["pantalla_actual"] = list(pantallas)[0]
+    # Si la pantalla actual ya no existe (por permisos), ir al primero
+    if st.session_state["pantalla_actual"] not in pantallas:
+        st.session_state["pantalla_actual"] = list(pantallas)[0]
+
+    # Renderizar acordeon
+    for grupo, items in GRUPOS:
+        items_ok = [i for i in items if i in pantallas]
+        if not items_ok:
+            continue
+        activo_aqui = st.session_state["pantalla_actual"] in items_ok
+        with st.sidebar.expander(grupo, expanded=activo_aqui):
+            for item in items_ok:
+                if item == st.session_state["pantalla_actual"]:
+                    # Item activo — texto destacado
+                    st.markdown(f'<div class="menu-item-activo">{item}</div>',
+                                unsafe_allow_html=True)
+                else:
+                    # Item clickeable — boton
+                    if st.button(item, key=f"nav_{item}", use_container_width=True):
+                        st.session_state["pantalla_actual"] = item
+                        st.rerun()
+
+    if st.sidebar.button("Cerrar sesión", use_container_width=True):
         st.session_state.clear()
         st.rerun()
+
+    menu = st.session_state["pantalla_actual"]
     ct = texto_contacto(leer_contacto())
     if ct:
         st.sidebar.markdown("---\n**Ayuda y soporte**  \n" + ct)
