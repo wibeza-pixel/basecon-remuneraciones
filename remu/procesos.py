@@ -74,7 +74,6 @@ def entradas_desde_movimiento(mov: dict | None, conceptos: list[dict], contrato:
     he = {k: (mov.get(f"cant_{k}"), mov.get(f"valor_{k}")) for k in ("he_50", "he_100", "hd", "hed")}
     out = {"dias": dias, "he_detalle": he, "haberes_imponibles_extra": imp, "haberes_no_imponibles_extra": noimp,
            "descuentos_extra": desc, "anticipo": _n(mov.get("anticipo")), "dias_licencia": _n(mov.get("licencia"))}
-    # Colación y movilización del mes reemplazan a las del contrato solo si se informan
     if _n(mov.get("colacion")):
         out["colacion_mes"] = _n(mov["colacion"])
     if _n(mov.get("movilizacion")):
@@ -98,6 +97,15 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
     movs = movimientos_periodo(conn, emp["id"], periodo) if usar_movimientos else {}
     conceptos = conceptos_empresa(conn, emp["id"], solo_activos=False) if movs else []
     avisos = {}
+
+    # [v5] Cuotas de prestamos del periodo (incluye p.num_cuotas para el detalle)
+    cuotas_prest = db.rows(conn, """
+        SELECT c.*, p.tipo, p.descripcion, p.trabajador_id, p.id AS prestamo_id, p.num_cuotas
+        FROM prestamos_cuotas c
+        JOIN prestamos p ON c.prestamo_id = p.id
+        WHERE p.empresa_id = ? AND c.periodo = ? AND p.activo = 1 AND c.estado = 'pendiente'
+    """, (emp["id"], periodo))
+
     for c in contratos:
         mov = movs.get(c["tid"])
         if mov:
@@ -106,9 +114,34 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
             e = {"dias": dias_inp.get(c["tid"], dias_default), "anticipo": ant_inp.get(c["tid"], 0),
                  "horas_extras": he_inp.get(c["tid"], 0)}
         del_mes = "colacion_mes" in e or "movilizacion_mes" in e
-        prop = float(e["dias"]) / 30.0 if del_mes else 1.0  # el concepto no informado se prorratea igual
+        prop = float(e["dias"]) / 30.0 if del_mes else 1.0
         movil = e.get("movilizacion_mes", _n(c.get("movilizacion")) * prop)
         colac = e.get("colacion_mes", _n(c.get("colacion")) * prop)
+
+        # [v5] Sumar cuotas del prestamo a descuentos_extra
+        # Un unico item por cuota (sin duplicar en detalle)
+        desc_ext_actual = list(e.get("descuentos_extra") or [])
+        prest_empresa_total = 0.0
+        prest_ccaf_total = 0.0
+        for cp in cuotas_prest:
+            if cp["trabajador_id"] == c["tid"]:
+                monto_cp = float(cp["monto"])
+                num_cuo = cp.get("numero_cuota", "")
+                num_tot = cp.get("num_cuotas", "")
+                nombre_completo = f"Cuota prestamo {cp['tipo']} {num_cuo}/{num_tot}".strip()
+                if cp.get("descripcion"):
+                    nombre_completo += f" - {cp['descripcion']}"
+                desc_ext_actual.append({
+                    "nombre": nombre_completo,
+                    "monto": monto_cp,
+                    "codigo_lre": 3188,
+                    "tipo": "Descuento",
+                })
+                if cp["tipo"] == "Empresa":
+                    prest_empresa_total += monto_cp
+                elif cp["tipo"] == "CCAF":
+                    prest_ccaf_total += monto_cp
+
         calc = K.calcular_liquidacion(
             c["sueldo_base"], c.get("gratificacion") or 0, movil, colac,
             c.get("otros_haberes") or 0, e["dias"], c["afp"], c["salud"],
@@ -122,8 +155,9 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
             fecha_inicio_contrato=c.get("fecha_inicio"), he_detalle=e.get("he_detalle"),
             haberes_imponibles_extra=e.get("haberes_imponibles_extra"),
             haberes_no_imponibles_extra=e.get("haberes_no_imponibles_extra"),
-            descuentos_extra=e.get("descuentos_extra"), dias_licencia=e.get("dias_licencia", 0),
+            descuentos_extra=desc_ext_actual, dias_licencia=e.get("dias_licencia", 0),
             asignaciones_del_mes=del_mes)
+
         campos = ["horas_extras", "monto_horas_extras", "sueldo_calculado", "gratificacion",
                   "movilizacion", "colacion", "asignacion_familiar", "otros_haberes", "total_haberes", "total_imponible",
                   "afp_monto", "salud_monto", "salud_fonasa", "salud_ccaf", "adicional_isapre", "sis_monto",
@@ -136,15 +170,20 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
                     dias_trabajados=e["dias"], sueldo_base=c["sueldo_base"],
                     dias_vacaciones=_n((mov or {}).get("dias_vacaciones")),
                     detalle=json.dumps(calc["detalle"], ensure_ascii=False),
-                    advertencias=json.dumps(calc["advertencias"], ensure_ascii=False))
+                    advertencias=json.dumps(calc["advertencias"], ensure_ascii=False),
+                    prestamo_empresa=prest_empresa_total,
+                    prestamo_ccaf=prest_ccaf_total)
         db.upsert(conn, "liquidaciones", data, ["empresa_id", "trabajador_id", "periodo"])
         if calc["advertencias"]:
             avisos[c["tid"]] = calc["advertencias"]
     conn.commit()
+
+    # [v3] Marcar las cuotas de prestamos como pagadas (ya se descontaron)
+    for cp in cuotas_prest:
+        marcar_cuota_pagada(conn, cp["id"])
+    conn.commit()
+
     return len(contratos), avisos
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -155,14 +194,7 @@ def calcular_periodo(conn, emp, periodo, ind, dias_default=30, he_inp=None, ant_
 def crear_prestamo(conn, empresa_id, trabajador_id, tipo, descripcion,
                    monto_total, cuota_mensual, num_cuotas,
                    fecha_inicio, fecha_otorgado=None, usuario="") -> int:
-    """Crea un préstamo y genera N cuotas automáticamente.
-
-    tipo: "Empresa" o "CCAF"
-    monto_total: monto otorgado (Empresa); puede ser None para CCAF
-    cuota_mensual: monto de cada cuota
-    num_cuotas: cantidad total de cuotas
-    fecha_inicio: período de la primera cuota (ej. "2026-11")
-    """
+    """Crea un préstamo y genera N cuotas automáticamente."""
     saldo = float(cuota_mensual) * int(num_cuotas) if tipo == "Empresa" else None
 
     prestamo_id = db.insert(conn, "prestamos", {

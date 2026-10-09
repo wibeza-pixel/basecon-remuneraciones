@@ -83,6 +83,7 @@ def pantalla_movimientos(conn, ctx):
         return
     conceptos = PR.conceptos_empresa(conn, emp["id"])
     movs = PR.movimientos_periodo(conn, emp["id"], periodo)
+    cuotas_prestamos = PR.cuotas_del_periodo(conn, emp["id"], periodo)
     ver_valores = st.toggle("Informar valores en pesos de horas extra (si no, se calculan con el sueldo del contrato)",
                             value=any(float(m.get(k) or 0) for m in movs.values() for k, _ in COLUMNAS_VALOR))
 
@@ -178,6 +179,18 @@ def pantalla_movimientos(conn, ctx):
                 st.markdown("##### 📝 Observación")
                 obs = st.text_area("Observación (opcional)", value=m.get("observacion") or "",
                                    key=f"obs_{t['id']}", height=68)
+
+                # ───── Bloque 5: Préstamos vigentes ─────
+                cuotas_trab = cuotas_prestamos.get(t["id"], [])
+                if cuotas_trab:
+                    st.markdown("##### 🏦 Préstamos vigentes este mes")
+                    for c in cuotas_trab:
+                        icono = "💰" if c["tipo"] == "Empresa" else "🏥"
+                        st.caption(f"{icono} **{c['tipo']}** — {c.get('descripcion') or ''}")
+                        cc1, cc2, cc3 = st.columns([3, 1, 1])
+                        cc1.write(f"Cuota **{c['numero_cuota']}/{c['num_cuotas']}** · **${float(c['monto']):,.0f}**")
+                        cc2.checkbox("Incluir", value=True, key=f"incl_{c['id']}")
+                       
 
                 # ───── Botón guardar (por trabajador) ─────
                 if not bloqueado:
