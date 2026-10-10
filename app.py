@@ -681,7 +681,6 @@ def pantalla_recuperar_clave():
                 if info:
                     _api = __import__("remu.email_utils", fromlist=["_api_key"])._api_key()
                     _from = __import__("remu.email_utils", fromlist=["_from_email"])._from_email()
-                    st.info(f"DEBUG: API Key={'SI' if _api else 'NO'} | From={_from} | Email={info.get('email')}")
                     ok = EU.enviar_email_recuperacion(info["email"], info["nombre"], info["token"])
                     if ok:
                         st.success("Si el usuario existe, te enviamos un email con las instrucciones.")
