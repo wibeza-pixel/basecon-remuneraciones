@@ -664,7 +664,7 @@ def pantalla_recuperar_clave():
     st.markdown('<div class="login-bg"></div>', unsafe_allow_html=True)
     col = st.columns([1, 2, 1])[1]
     with col:
-        st.markdown('<div class="login-title">Recuperar contrasena V4 Y DEBUG COMPLETO</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">Recuperar contrasena</div>', unsafe_allow_html=True)
         st.markdown('<div class="login-subtitle">Te enviaremos un correo con un link para restablecer tu clave</div>',
                     unsafe_allow_html=True)
 
@@ -686,12 +686,14 @@ def pantalla_recuperar_clave():
                     if ok:
                         st.success("Si el usuario existe, te enviamos un email con las instrucciones.")
                     else:
+                        _d1 = st.session_state.pop("_resend_debug_1", "(no d1)")
+                        _d2 = st.session_state.pop("_resend_debug_2", "(no d2)")
+                        st.code("D1=" + _d1 + " | D2=" + _d2)
                         _resp = st.session_state.pop("_resend_response", "(sin response)")
-                    st.code("RESEND RESPONSE: " + _resp)
-                    _err = st.session_state.pop("_email_error", "(sin detalle)")
-                    st.error("No se pudo enviar el email: " + _err)
+                        st.code("RESEND RESPONSE: " + _resp)
+                        _err = st.session_state.pop("_email_error", "(sin detalle)")
+                        st.error("No se pudo enviar el email: " + _err)
                 else:
-                    # Seguridad: no revelar si el usuario existe o no
                     st.success("Si el usuario existe, te enviamos un email con las instrucciones.")
 
         st.markdown('<div class="login-soporte">', unsafe_allow_html=True)
@@ -701,7 +703,6 @@ def pantalla_recuperar_clave():
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
-
 
 def pantalla_reset_clave(token: str):
     """Pantalla para cambiar contrasena usando un token valido."""
