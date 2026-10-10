@@ -664,7 +664,7 @@ def pantalla_recuperar_clave():
     st.markdown('<div class="login-bg"></div>', unsafe_allow_html=True)
     col = st.columns([1, 2, 1])[1]
     with col:
-        st.markdown('<div class="login-title">Recuperar contrasena V3</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">Recuperar contrasena V4 Y DEBUG COMPLETO</div>', unsafe_allow_html=True)
         st.markdown('<div class="login-subtitle">Te enviaremos un correo con un link para restablecer tu clave</div>',
                     unsafe_allow_html=True)
 
