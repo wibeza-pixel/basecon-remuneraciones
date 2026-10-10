@@ -47,29 +47,29 @@ def _set_debug(key: str, value: str) -> None:
 
 def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bool:
     """Envia email con link para recuperar contrasena."""
-    _set_debug("_resend_debug_0", "inicio")
+    #_set_debug("_resend_debug_0", "inicio")
 
     api_key = _api_key()
     if not api_key:
-        _set_debug("_email_error", "RESEND_API_KEY vacio")
+        #_set_debug("_email_error", "RESEND_API_KEY vacio")
         return False
 
-    _set_debug("_resend_debug_1", "llegue antes de resend.api_key")
+    #_set_debug("_resend_debug_1", "llegue antes de resend.api_key")
 
     try:
         import resend
     except ImportError:
-        _set_debug("_email_error", "resend no instalado")
+        #_set_debug("_email_error", "resend no instalado")
         return False
 
     try:
         resend.api_key = api_key
-        _set_debug("_resend_debug_2", "API key seteado OK")
+        #_set_debug("_resend_debug_2", "API key seteado OK")
     except Exception as e:
-        _set_debug("_email_error", "ERROR api_key: " + str(e))
+        #_set_debug("_email_error", "ERROR api_key: " + str(e))
         return False
 
-    _set_debug("_resend_debug_3", "construyendo html")
+    #_set_debug("_resend_debug_3", "construyendo html")
 
     link = _app_url() + "/?reset_token=" + token
 
@@ -83,7 +83,7 @@ def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bo
         '</div>'
     )
 
-    _set_debug("_resend_debug_4", "antes de resend.Emails.send")
+    #_set_debug("_resend_debug_4", "antes de resend.Emails.send")
 
     try:
         params = {
@@ -93,9 +93,9 @@ def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bo
             "html": html,
         }
         r = resend.Emails.send(params)
-        _set_debug("_resend_response", repr(r))
+        #_set_debug("_resend_response", repr(r))
         return True
     except Exception as e:
-        _set_debug("_email_error", "ERROR en send: " + str(e))
-        _set_debug("_resend_debug_4", "EXCEPCION: " + str(e))
+        #_set_debug("_email_error", "ERROR en send: " + str(e))
+        #_set_debug("_resend_debug_4", "EXCEPCION: " + str(e))
         return False
