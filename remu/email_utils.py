@@ -59,7 +59,26 @@ def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bo
         print("[email] ERROR: resend no instalado")
         return False
 
-    resend.api_key = api_key
+    try:
+        import streamlit as st
+        st.session_state["_resend_debug_1"] = "llegué antes de resend.api_key"
+    except Exception:
+        pass
+
+    try:
+        resend.api_key = api_key
+        try:
+            import streamlit as st
+            st.session_state["_resend_debug_2"] = "API key seteado OK"
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            import streamlit as st
+            st.session_state["_resend_debug_2"] = "ERROR en api_key: " + str(e)
+        except Exception:
+            pass
+        return False
     link = _app_url() + "/?reset_token=" + token
 
     html = (
