@@ -2126,6 +2126,7 @@ def main():
         return
 
     # ─── Pantalla de recuperar contrasena (activada por boton) ───
+    print("[DEBUG] RESEND_API_KEY leido:", "SI" if __import__("remu.email_utils", fromlist=["_api_key"])._api_key() else "NO")
     if st.session_state.get("_ir_recuperar") and not st.session_state.get("usuario"):
         pantalla_recuperar_clave()
         return

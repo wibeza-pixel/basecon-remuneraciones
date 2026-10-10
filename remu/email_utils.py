@@ -45,6 +45,11 @@ def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bo
     """Envia email con link para recuperar contrasena."""
     api_key = _api_key()
     if not api_key:
+        try:
+            import streamlit as st
+            st.session_state["_email_error"] = "RESEND_API_KEY no configurado o vacio"
+        except Exception:
+            pass
         print("[email] ERROR: RESEND_API_KEY no configurado")
         return False
 
