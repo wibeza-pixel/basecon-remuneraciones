@@ -107,4 +107,9 @@ def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bo
         return True
     except Exception as e:
         print("[email] ERROR al enviar: " + str(e))
+        try:
+            import streamlit as st
+            st.session_state["_email_error"] = str(e)
+        except Exception:
+            pass
         return False
