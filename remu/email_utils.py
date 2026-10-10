@@ -103,7 +103,12 @@ def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bo
             "html": html,
         }
         r = resend.Emails.send(params)
-        print("[email] Enviado a " + destinatario)
+        print("[email] Respuesta:", repr(r))
+        try:
+            import streamlit as st
+            st.session_state["_resend_response"] = repr(r)
+        except Exception:
+            pass
         return True
     except Exception as e:
         print("[email] ERROR al enviar: " + str(e))
