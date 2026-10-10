@@ -216,3 +216,104 @@ def en_la_nube_sin_bd_persistente() -> bool:
     en_cloud = str(C.BASE_DIR).startswith("/mount/src") or bool(os.environ.get("STREAMLIT_SHARING_MODE")) \
         or os.environ.get("HOSTNAME", "").startswith("streamlit")
     return en_cloud and not db.is_postgres()
+
+
+# ═══════════════════════════════════════════════════════════
+# RECUPERACION DE CONTRASENA
+# ═══════════════════════════════════════════════════════════
+
+def generar_token_recuperacion(usuario_o_email: str) -> dict | None:
+    """
+    Genera un token de recuperacion para el usuario (por usuario o email).
+    Retorna dict con {token, usuario, email, nombre} o None si no existe.
+    """
+    import secrets
+    from datetime import datetime, timedelta
+    from . import db
+
+    conn = db.get_conn()
+    try:
+        # Buscar por usuario o email
+        row = db.row(conn,
+            "SELECT id, usuario, nombre, email FROM usuarios "
+            "WHERE usuario = ? OR email = ? LIMIT 1",
+            (usuario_o_email, usuario_o_email))
+        if not row:
+            return None
+        if not row.get("email"):
+            return None
+
+        # Generar token unico
+        token = secrets.token_urlsafe(32)
+        expira = datetime.now() + timedelta(hours=1)
+
+        # Invalidar tokens anteriores del mismo usuario
+        conn.execute(
+            "UPDATE password_resets SET usado = 1 WHERE usuario_id = ? AND usado = 0",
+            (row["id"],))
+        # Guardar nuevo token
+        conn.execute(
+            "INSERT INTO password_resets (usuario_id, token, expira_at) VALUES (?, ?, ?)",
+            (row["id"], token, expira))
+        conn.commit()
+
+        return {
+            "token": token,
+            "usuario": row["usuario"],
+            "email": row["email"],
+            "nombre": row.get("nombre") or row["usuario"],
+        }
+    finally:
+        conn.close()
+
+
+def validar_token_recuperacion(token: str) -> dict | None:
+    """
+    Valida un token de recuperacion.
+    Retorna {usuario_id, usuario, email} si es valido, o None.
+    """
+    from datetime import datetime
+    from . import db
+
+    conn = db.get_conn()
+    try:
+        row = db.row(conn,
+            "SELECT r.usuario_id, r.expira_at, u.usuario, u.email "
+            "FROM password_resets r JOIN usuarios u ON r.usuario_id = u.id "
+            "WHERE r.token = ? AND r.usado = 0 LIMIT 1",
+            (token,))
+        if not row:
+            return None
+        # Verificar expiracion
+        if row["expira_at"] < datetime.now():
+            return None
+        return {
+            "usuario_id": row["usuario_id"],
+            "usuario": row["usuario"],
+            "email": row.get("email"),
+        }
+    finally:
+        conn.close()
+
+
+def cambiar_clave_con_token(token: str, nueva_clave: str) -> bool:
+    """
+    Cambia la contrasena usando un token valido.
+    Retorna True si OK, False si el token es invalido.
+    """
+    from . import db
+
+    info = validar_token_recuperacion(token)
+    if not info:
+        return False
+
+    conn = db.get_conn()
+    try:
+        # Actualizar la clave
+        actualizar_usuario(info["usuario_id"], clave=nueva_clave)
+        # Marcar token como usado
+        conn.execute("UPDATE password_resets SET usado = 1 WHERE token = ?", (token,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()

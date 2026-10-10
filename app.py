@@ -26,6 +26,7 @@ from remu import finiquitos as FQ
 from remu import libros as L
 from remu import previred as P
 from remu import seguridad as S
+from remu import email_utils as EU
 from remu.pdf_indicadores import parse_indicadores_pdf
 from remu.procesos import calcular_periodo
 from remu import procesos as PR
@@ -656,6 +657,89 @@ def _render_selector_mes():
                          on_change=_on_mes_change)
 
 
+
+
+def pantalla_recuperar_clave():
+    """Pantalla para solicitar recuperacion de contrasena."""
+    st.markdown('<div class="login-bg"></div>', unsafe_allow_html=True)
+    col = st.columns([1, 2, 1])[1]
+    with col:
+        st.markdown('<div class="login-title">Recuperar contrasena</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-subtitle">Te enviaremos un correo con un link para restablecer tu clave</div>',
+                    unsafe_allow_html=True)
+
+        with st.form("recuperar"):
+            ident = st.text_input("Usuario o email", placeholder="Tu usuario o email registrado")
+            enviar = st.form_submit_button("Enviar link de recuperacion", type="primary", width="stretch")
+
+        if enviar:
+            ident = (ident or "").strip()
+            if not ident:
+                st.error("Ingresa tu usuario o email.")
+            else:
+                info = S.generar_token_recuperacion(ident)
+                if info:
+                    ok = EU.enviar_email_recuperacion(info["email"], info["nombre"], info["token"])
+                    if ok:
+                        st.success("Si el usuario existe, te enviamos un email con las instrucciones.")
+                    else:
+                        st.error("No se pudo enviar el email. Contacta al administrador.")
+                else:
+                    # Seguridad: no revelar si el usuario existe o no
+                    st.success("Si el usuario existe, te enviamos un email con las instrucciones.")
+
+        st.markdown('<div class="login-soporte">', unsafe_allow_html=True)
+        if st.button("Volver al login", key="volver_login"):
+            st.session_state.pop("_ir_recuperar", None)
+            st.query_params.clear()
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+
+def pantalla_reset_clave(token: str):
+    """Pantalla para cambiar contrasena usando un token valido."""
+    st.markdown('<div class="login-bg"></div>', unsafe_allow_html=True)
+    col = st.columns([1, 2, 1])[1]
+    with col:
+        info = S.validar_token_recuperacion(token)
+        if not info:
+            st.markdown('<div class="login-title">Link invalido o expirado</div>', unsafe_allow_html=True)
+            st.error("Este link ya no es valido. Solicita uno nuevo.")
+            if st.button("Volver al login", key="volver_login_inv"):
+                st.query_params.clear()
+                st.rerun()
+            st.stop()
+
+        st.markdown('<div class="login-title">Nueva contrasena</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-subtitle">Usuario: ' + info["usuario"] + '</div>', unsafe_allow_html=True)
+
+        with st.form("reset_clave"):
+            c1 = st.text_input("Nueva contrasena", type="password",
+                               placeholder="Minimo 8 caracteres, letras y numeros")
+            c2 = st.text_input("Repetir contrasena", type="password")
+            guardar = st.form_submit_button("Cambiar contrasena", type="primary", width="stretch")
+
+        if guardar:
+            if c1 != c2:
+                st.error("Las contrasenas no coinciden.")
+            else:
+                err = S.validar_clave_nueva(c1)
+                if err:
+                    st.error(err)
+                else:
+                    ok = S.cambiar_clave_con_token(token, c1)
+                    if ok:
+                        st.success("Contrasena cambiada. Ya puedes iniciar sesion.")
+                        st.query_params.clear()
+                        if st.button("Ir al login", key="ir_login"):
+                            st.rerun()
+                    else:
+                        st.error("No se pudo cambiar la contrasena. Intenta de nuevo.")
+    st.stop()
+
+
+
 def pantalla_configuracion_inicial():
     st.title("BASECON — Configuración inicial")
     st.info("No hay usuarios creados. Defina el usuario administrador (dueño del sistema). "
@@ -722,6 +806,11 @@ def pantalla_login():
                     st.session_state["bloqueo_hasta"] = time.time() + 30
                     st.session_state["intentos"] = 0
                 st.error(motivo)
+
+        # Link "olvidaste tu contrasena"
+        if st.button("Olvide mi contrasena", key="olvide_clave", use_container_width=True):
+            st.session_state["_ir_recuperar"] = True
+            st.rerun()
 
         # Info de soporte
         ct = texto_contacto(leer_contacto())
@@ -2027,6 +2116,19 @@ las liquidaciones (toma los movimientos automáticamente) → cierra el periodo.
 def main():
     if not S.hay_usuarios():
         pantalla_configuracion_inicial()
+
+    # ─── Detectar token de recuperacion en URL ───
+    qp = st.query_params
+    reset_token = qp.get("reset_token")
+    if reset_token:
+        pantalla_reset_clave(reset_token)
+        return
+
+    # ─── Pantalla de recuperar contrasena (activada por boton) ───
+    if st.session_state.get("_ir_recuperar") and not st.session_state.get("usuario"):
+        pantalla_recuperar_clave()
+        return
+
     if not st.session_state.get("usuario"):
         pantalla_login()
     u = usuario_actual()
