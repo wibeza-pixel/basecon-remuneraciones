@@ -677,9 +677,7 @@ def pantalla_recuperar_clave():
             if not ident:
                 st.error("Ingresa tu usuario o email.")
             else:
-                _apikey_ok = bool(__import__("remu.email_utils", fromlist=["_api_key"])._api_key())
-            st.info("DEBUG: API key leido: " + ("SI" if _apikey_ok else "NO"))
-            info = S.generar_token_recuperacion(ident)
+                info = S.generar_token_recuperacion(ident)
                 if info:
                     ok = EU.enviar_email_recuperacion(info["email"], info["nombre"], info["token"])
                     if ok:
