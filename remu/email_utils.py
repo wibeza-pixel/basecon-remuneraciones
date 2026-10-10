@@ -1,12 +1,10 @@
-"""Envio de emails via Resend (recuperar contrasena, notificaciones)."""
+"""Envio de emails via Resend."""
 from __future__ import annotations
-
 import os
 from typing import Optional
 
 
 def _api_key() -> Optional[str]:
-    """Lee el API key de Resend desde secrets o variables de entorno."""
     try:
         import streamlit as st
         key = st.secrets.get("RESEND_API_KEY")
@@ -18,7 +16,6 @@ def _api_key() -> Optional[str]:
 
 
 def _from_email() -> str:
-    """Devuelve el remitente."""
     try:
         import streamlit as st
         e = st.secrets.get("FROM_EMAIL")
@@ -30,7 +27,6 @@ def _from_email() -> str:
 
 
 def _app_url() -> str:
-    """URL base de la app (para los links de recuperacion)."""
     try:
         import streamlit as st
         u = st.secrets.get("APP_URL")
@@ -41,78 +37,53 @@ def _app_url() -> str:
     return os.environ.get("APP_URL", "http://localhost:8501")
 
 
+def _set_debug(key: str, value: str) -> None:
+    try:
+        import streamlit as st
+        st.session_state[key] = value
+    except Exception:
+        pass
+
+
 def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bool:
     """Envia email con link para recuperar contrasena."""
+    _set_debug("_resend_debug_0", "inicio")
+
     api_key = _api_key()
     if not api_key:
-        try:
-            import streamlit as st
-            st.session_state["_email_error"] = "RESEND_API_KEY no configurado o vacio"
-        except Exception:
-            pass
-        print("[email] ERROR: RESEND_API_KEY no configurado")
+        _set_debug("_email_error", "RESEND_API_KEY vacio")
         return False
+
+    _set_debug("_resend_debug_1", "llegue antes de resend.api_key")
 
     try:
         import resend
     except ImportError:
-        print("[email] ERROR: resend no instalado")
+        _set_debug("_email_error", "resend no instalado")
         return False
-
-    try:
-        import streamlit as st
-        st.session_state["_resend_debug_1"] = "llegué antes de resend.api_key"
-    except Exception:
-        pass
 
     try:
         resend.api_key = api_key
-        try:
-            import streamlit as st
-            st.session_state["_resend_debug_2"] = "API key seteado OK"
-        except Exception:
-            pass
+        _set_debug("_resend_debug_2", "API key seteado OK")
     except Exception as e:
-        try:
-            import streamlit as st
-            st.session_state["_resend_debug_2"] = "ERROR en api_key: " + str(e)
-        except Exception:
-            pass
+        _set_debug("_email_error", "ERROR api_key: " + str(e))
         return False
+
+    _set_debug("_resend_debug_3", "construyendo html")
+
     link = _app_url() + "/?reset_token=" + token
 
     html = (
-        '<div style="font-family: -apple-system, sans-serif; max-width: 520px; '
-        'margin: 0 auto; padding: 2rem; background: #f5f7fb;">'
-        '<div style="background: #ffffff; border-radius: 14px; padding: 2rem; '
-        'box-shadow: 0 4px 12px rgba(11,31,58,0.08);">'
-        '<div style="text-align: center; margin-bottom: 1.5rem;">'
-        '<h1 style="color: #0b1f3a; font-size: 1.6rem; margin: 0;">BASECON</h1>'
-        '<p style="color: #5a6b85; font-size: 0.9rem; margin: 0.3rem 0 0 0;">'
-        'Recuperar contrasena</p></div>'
-        '<hr style="border: none; border-top: 1px solid #e3e8f0; margin: 1.5rem 0;">'
-        '<p style="color: #1a1a1a; font-size: 1rem; line-height: 1.6;">'
-        'Hola <strong>' + usuario + '</strong>,</p>'
-        '<p style="color: #1a1a1a; font-size: 1rem; line-height: 1.6;">'
-        'Recibimos una solicitud para restablecer la contrasena de tu cuenta. '
-        'Si fuiste tu, haz clic en el siguiente boton:</p>'
-        '<div style="text-align: center; margin: 2rem 0;">'
-        '<a href="' + link + '" style="display: inline-block; background: #0b1f3a; '
-        'color: #ffffff; text-decoration: none; padding: 0.85rem 2rem; '
-        'border-radius: 10px; font-weight: 700; font-size: 1rem;">'
-        'Restablecer contrasena</a></div>'
-        '<p style="color: #5a6b85; font-size: 0.88rem; line-height: 1.6;">'
-        'Si no puedes hacer clic, copia este link en tu navegador:<br>'
-        '<a href="' + link + '" style="color: #0b1f3a; word-break: break-all;">'
-        + link + '</a></p>'
-        '<hr style="border: none; border-top: 1px solid #e3e8f0; margin: 1.5rem 0;">'
-        '<p style="color: #8b98ac; font-size: 0.82rem; line-height: 1.5; margin: 0;">'
-        'Este link expira en 1 hora. Si no solicitaste este cambio, ignora este correo.</p>'
-        '</div>'
-        '<p style="text-align: center; color: #8b98ac; font-size: 0.78rem; margin-top: 1.5rem;">'
-        'Basecon &copy; 2026 &mdash; Sistema de Remuneraciones Chile</p>'
+        '<div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; padding: 2rem;">'
+        '<h1>BASECON</h1>'
+        '<p>Hola ' + usuario + ',</p>'
+        '<p>Haz clic para restablecer tu contrasena:</p>'
+        '<p><a href="' + link + '">Restablecer contrasena</a></p>'
+        '<p>O copia este link: ' + link + '</p>'
         '</div>'
     )
+
+    _set_debug("_resend_debug_4", "antes de resend.Emails.send")
 
     try:
         params = {
@@ -122,18 +93,9 @@ def enviar_email_recuperacion(destinatario: str, usuario: str, token: str) -> bo
             "html": html,
         }
         r = resend.Emails.send(params)
-        print("[email] Respuesta:", repr(r))
-        try:
-            import streamlit as st
-            st.session_state["_resend_response"] = repr(r)
-        except Exception:
-            pass
+        _set_debug("_resend_response", repr(r))
         return True
     except Exception as e:
-        print("[email] ERROR al enviar: " + str(e))
-        try:
-            import streamlit as st
-            st.session_state["_email_error"] = str(e)
-        except Exception:
-            pass
+        _set_debug("_email_error", "ERROR en send: " + str(e))
+        _set_debug("_resend_debug_4", "EXCEPCION: " + str(e))
         return False
