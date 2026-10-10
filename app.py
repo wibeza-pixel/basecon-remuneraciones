@@ -683,7 +683,8 @@ def pantalla_recuperar_clave():
                     if ok:
                         st.success("Si el usuario existe, te enviamos un email con las instrucciones.")
                     else:
-                        st.error("No se pudo enviar el email. Contacta al administrador.")
+                        _err = st.session_state.pop("_email_error", "(sin detalle)")
+                    st.error("No se pudo enviar el email: " + _err)
                 else:
                     # Seguridad: no revelar si el usuario existe o no
                     st.success("Si el usuario existe, te enviamos un email con las instrucciones.")
