@@ -9,3 +9,4 @@ Para usarla en Streamlit Cloud, configure `DATABASE_URL` (Supabase) y `BASECON_S
 
 El detalle de los cambios está en `CAMBIOS.md`.
  
+ 
