@@ -8,3 +8,4 @@ python -m pytest -q tests     # pruebas (SQLite); con TEST_DATABASE_URL=... tamb
 Para usarla en Streamlit Cloud, configure `DATABASE_URL` (Supabase) y `BASECON_SECRET` en *Settings → Secrets* (vea `.streamlit/secrets.toml.example`).
 
 El detalle de los cambios está en `CAMBIOS.md`.
+ 
